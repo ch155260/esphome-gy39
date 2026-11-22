@@ -37,3 +37,5 @@ sensor:
       name: "GY39 Humidity"
     altitude:
       name: "GY39 Altitude"
+    absolute_humidity:
+      name: "GY39 Absolute Humidity"

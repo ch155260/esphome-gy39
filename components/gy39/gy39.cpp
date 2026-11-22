@@ -2,6 +2,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 
+#include <cmath>
+
 namespace esphome {
 namespace gy39 {
 
@@ -22,6 +24,66 @@ void GY39Component::dump_config() {
   LOG_SENSOR("  ", "Pressure", this->pressure_sensor_);
   LOG_SENSOR("  ", "Humidity", this->humidity_sensor_);
   LOG_SENSOR("  ", "Altitude", this->altitude_sensor_);
+  LOG_SENSOR("  ", "Absolute Humidity", this->absolute_humidity_sensor_);
+}
+
+// ---------------------------------------------------------------- absolute humidity
+//
+// e   = RH/100 * f(p, t) * e_w(T)          actual vapour pressure (WMO definition of RH)
+// rho = e * M_w / (Z * R * T)              vapour density
+//
+// e_w : saturation vapour pressure over liquid water
+//       T >= 273.16 K : Wagner & Pruss (2002), IAPWS auxiliary equation (deviation from IAPWS-95 < 0.01 %)
+//       T <  273.16 K : Murphy & Koop (2005), supercooled liquid water
+//       Both give 611.657 Pa at the triple point, so the curve is continuous.
+// f   : water-vapour enhancement factor in moist air, Buck (1996, CR-1A manual)
+// Z   : compressibility factor of moist air, CIPM-2007 (Picard et al., Metrologia 45, 2008)
+
+double GY39Component::saturation_vapor_pressure_water(double temperature_k) {
+  const double T = temperature_k;
+  if (T >= 273.16) {
+    static const double TC = 647.096;    // K, critical temperature
+    static const double PC = 22.064e6;   // Pa, critical pressure
+    const double tau = 1.0 - T / TC;
+    const double s = -7.85951783 * tau + 1.84408259 * std::pow(tau, 1.5) - 11.7866497 * std::pow(tau, 3.0) +
+                     22.6807411 * std::pow(tau, 3.5) - 15.9618719 * std::pow(tau, 4.0) +
+                     1.80122502 * std::pow(tau, 7.5);
+    return PC * std::exp(TC / T * s);
+  }
+  const double ln_t = std::log(T);
+  return std::exp(54.842763 - 6763.22 / T - 4.210 * ln_t + 0.000367 * T +
+                  std::tanh(0.0415 * (T - 218.8)) * (53.878 - 1331.22 / T - 9.44523 * ln_t + 0.014025 * T));
+}
+
+double GY39Component::compute_absolute_humidity(double temperature_c, double rh_percent, double pressure_pa) {
+  // Validity: BME280 operating range and range of the equations used.
+  if (!std::isfinite(temperature_c) || !std::isfinite(rh_percent) || !std::isfinite(pressure_pa))
+    return NAN;
+  if (temperature_c < -45.0 || temperature_c > 85.0 || pressure_pa < 30000.0 || pressure_pa > 110000.0)
+    return NAN;
+  if (rh_percent < 0.0)
+    rh_percent = 0.0;
+  if (rh_percent > 100.0)
+    rh_percent = 100.0;
+
+  static const double R = 8.314462618;   // J/(mol·K), CODATA 2018
+  static const double M_W = 18.01528e-3;  // kg/mol, molar mass of water
+
+  const double t = temperature_c;
+  const double T = t + 273.15;
+  const double p_hpa = pressure_pa / 100.0;
+
+  const double f = 1.0 + 1e-4 * (7.2 + p_hpa * (0.0320 + 5.9e-6 * t * t));
+  const double e = rh_percent / 100.0 * f * saturation_vapor_pressure_water(T);
+  const double xv = e / pressure_pa;  // mole fraction of water vapour
+
+  const double p_t = pressure_pa / T;
+  const double z = 1.0 -
+                   p_t * (1.58123e-6 - 2.9331e-8 * t + 1.1043e-10 * t * t + (5.707e-6 - 2.051e-8 * t) * xv +
+                          (1.9898e-4 - 2.376e-6 * t) * xv * xv) +
+                   p_t * p_t * (1.83e-11 - 0.765e-8 * xv * xv);
+
+  return e * M_W / (z * R * T) * 1000.0;  // kg/m³ -> g/m³
 }
 
 void GY39Component::publish_lux_(uint32_t raw) {
@@ -44,6 +106,17 @@ void GY39Component::publish_bme_(int16_t temp, uint32_t pressure, uint16_t humid
     this->humidity_sensor_->publish_state(h);
   if (this->altitude_sensor_ != nullptr)
     this->altitude_sensor_->publish_state(altitude);
+
+  if (this->absolute_humidity_sensor_ != nullptr) {
+    double ah = compute_absolute_humidity(temp / 100.0, humidity / 100.0, pressure / 100.0);
+    if (std::isnan(ah)) {
+      ESP_LOGW(TAG, "Inputs out of range, absolute humidity not calculated");
+      this->absolute_humidity_sensor_->publish_state(NAN);
+    } else {
+      ESP_LOGD(TAG, "Absolute humidity: %.3f g/m³", ah);
+      this->absolute_humidity_sensor_->publish_state(static_cast<float>(ah));
+    }
+  }
 }
 
 // ---------------------------------------------------------------- UART
@@ -69,7 +142,8 @@ void GY39UARTComponent::update() {
   }
   this->want_lux_ = this->illuminance_sensor_ != nullptr;
   this->want_bme_ = this->temperature_sensor_ != nullptr || this->pressure_sensor_ != nullptr ||
-                    this->humidity_sensor_ != nullptr || this->altitude_sensor_ != nullptr;
+                    this->humidity_sensor_ != nullptr || this->altitude_sensor_ != nullptr ||
+                    this->absolute_humidity_sensor_ != nullptr;
   this->last_request_ = millis();
   this->send_command_(CMD_QUERY_ALL);
 }

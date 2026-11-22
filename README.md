@@ -13,6 +13,7 @@ Both **UART** and **I2C** interfaces are supported.
 | `pressure`    | hPa  | Barometric pressure                               |
 | `humidity`    | %    | Relative humidity                                 |
 | `altitude`    | m    | Altitude estimated by the module from pressure    |
+| `absolute_humidity` | g/m³ | Water vapour density, **calculated** from temperature, RH and pressure ([details](#absolute-humidity)) |
 
 Every sensor is optional and accepts all standard
 [Sensor](https://esphome.io/components/sensor/) options (`name`, `id`, `filters`, …).
@@ -29,6 +30,7 @@ Every sensor is optional and accepts all standard
 - [Configuration variables](#configuration-variables)
 - [Recommendations](#recommendations)
 - [Troubleshooting](#troubleshooting)
+- [Absolute humidity](#absolute-humidity)
 - [Protocol notes](#protocol-notes)
 
 ---
@@ -125,6 +127,8 @@ sensor:
       name: "GY39 Humidity"
     altitude:
       name: "GY39 Altitude"
+    absolute_humidity:
+      name: "GY39 Absolute Humidity"
 ```
 
 ### ESP8266
@@ -199,6 +203,8 @@ sensor:
       name: "GY39 Humidity"
     altitude:
       name: "GY39 Altitude"
+    absolute_humidity:
+      name: "GY39 Absolute Humidity"
 ```
 
 For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with the same `frequency: 50kHz`.
@@ -222,6 +228,7 @@ For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with 
 | `pressure`        | all  | no       | –       | Pressure sensor (hPa) |
 | `humidity`        | all  | no       | –       | Humidity sensor (%) |
 | `altitude`        | all  | no       | –       | Altitude sensor (m) |
+| `absolute_humidity` | all | no      | –       | Absolute humidity (g/m³), calculated |
 
 ---
 
@@ -282,6 +289,50 @@ logger:
   logs:
     gy39: DEBUG
 ```
+
+---
+
+## Absolute humidity
+
+`absolute_humidity` is the mass of water vapour per cubic metre of air (g/m³).
+The module does not measure it directly. The component calculates it on the ESP, in double precision,
+from the temperature, relative humidity and pressure that the module reports in the same reading.
+It does not use the textbook Magnus approximation. Instead it uses reference-grade equations:
+
+**1. Actual vapour pressure** (WMO definition of relative humidity, referenced to liquid water):
+
+$$e = \frac{RH}{100}\cdot f(p,t)\cdot e_w(T)$$
+
+**2. Vapour density** (real-gas form):
+
+$$\rho_v = \frac{e \cdot M_w}{Z \cdot R \cdot T}$$
+
+| Term | Equation used | Notes |
+|---|---|---|
+| $e_w(T)$, T ≥ 0.01 °C | **Wagner & Pruss (2002)**, IAPWS saturation-pressure equation | Deviates from IAPWS-95 by < 0.01 % |
+| $e_w(T)$, T < 0.01 °C | **Murphy & Koop (2005)**, supercooled liquid water | Both equations give 611.657 Pa at the triple point, so the curve is continuous |
+| $f(p,t)$ | **Buck (1996)** enhancement factor $1+10^{-4}[7.2+P(0.0320+5.9\cdot10^{-6}t^2)]$ | Corrects for water vapour in air vs. pure vapour (≈ +0.4 % at 1013 hPa) |
+| $Z$ | **CIPM-2007** moist-air compressibility (Picard et al., *Metrologia* 45, 2008) | ≈ 0.9996 near room conditions |
+| $R$, $M_w$ | 8.314462618 J/(mol·K) (CODATA 2018), 18.01528 g/mol | |
+
+**Input handling**
+- RH is clamped to 0–100 %.
+- Results are only published for −45…85 °C and 300…1100 hPa (the BME280 range).
+  Outside that range the sensor publishes `NaN` and logs a warning.
+- The measured pressure is used, so the result stays correct at altitude.
+
+**Accuracy.** The equations add < 0.1 % error. The real limit is the BME280 itself
+(typically ±3 % RH and ±1 °C). At 25 °C, absolute humidity changes about 5.6 % per °C and
+proportionally with RH. So at 50 % RH, expect about **±8 %** overall (root-sum-square of both errors).
+To improve it, keep the module away from heat sources, which matters most, or calibrate the
+temperature with an `offset` filter.
+
+| Check (1013.25 hPa) | Result |
+|---|---|
+| 20 °C, 50 % RH | 8.68 g/m³ |
+| 30 °C, 100 % RH | 30.50 g/m³ |
+| 0 °C, 100 % RH | 4.87 g/m³ |
+| −10 °C, 80 % RH | 1.90 g/m³ |
 
 ---
 

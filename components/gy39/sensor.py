@@ -20,6 +20,10 @@ from esphome.const import (
 )
 
 CONF_ALTITUDE = "altitude"
+CONF_ABSOLUTE_HUMIDITY = "absolute_humidity"
+# Literal values so older ESPHome releases without these constants still work.
+DEVICE_CLASS_ABSOLUTE_HUMIDITY = "absolute_humidity"
+UNIT_GRAMS_PER_CUBIC_METER = "g/m³"
 CONF_INTERFACE = "interface"
 
 gy39_ns = cg.esphome_ns.namespace("gy39")
@@ -59,6 +63,13 @@ BASE_SCHEMA = cv.Schema(
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_ABSOLUTE_HUMIDITY): sensor.sensor_schema(
+            unit_of_measurement=UNIT_GRAMS_PER_CUBIC_METER,
+            icon="mdi:water",
+            accuracy_decimals=2,
+            device_class=DEVICE_CLASS_ABSOLUTE_HUMIDITY,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
     }
 ).extend(cv.polling_component_schema("60s"))
 
@@ -94,6 +105,7 @@ async def to_code(config):
         (CONF_PRESSURE, "set_pressure_sensor"),
         (CONF_HUMIDITY, "set_humidity_sensor"),
         (CONF_ALTITUDE, "set_altitude_sensor"),
+        (CONF_ABSOLUTE_HUMIDITY, "set_absolute_humidity_sensor"),
     ):
         if key in config:
             sens = await sensor.new_sensor(config[key])
