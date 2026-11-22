@@ -10,11 +10,6 @@ external_components:
   - source: github://ch155260/esphome-gy39@main
     components: [gy39]
     refresh: 1d
-  # Local development (inside a clone of this repository) / 本地開發時改用：
-  # - source:
-  #     type: local
-  #     path: ../components
-  #   components: [gy39]
 
 i2c:
   sda: GPIO4   # 接 GY-39 的 DR
