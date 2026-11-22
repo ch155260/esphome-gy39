@@ -12,11 +12,6 @@ external_components:
   - source: github://ch155260/esphome-gy39@main
     components: [gy39]
     refresh: 1d
-  # Local development (inside a clone of this repository) / 本地開發時改用：
-  # - source:
-  #     type: local
-  #     path: ../components
-  #   components: [gy39]
 
 uart:
   id: gy39_uart
