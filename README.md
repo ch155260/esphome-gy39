@@ -13,7 +13,8 @@ Both **UART** and **I2C** interfaces are supported.
 | `pressure`    | hPa  | Barometric pressure                               |
 | `humidity`    | %    | Relative humidity                                 |
 | `altitude`    | m    | Altitude estimated by the module from pressure    |
-| `absolute_humidity` | g/m³ | Water vapour density, **calculated** from temperature, RH and pressure ([details](#absolute-humidity)) |
+| `absolute_humidity` | g/m³ | Water vapour density, **calculated** from temperature, RH and pressure ([details](#absolute-humidity-and-dew-point)) |
+| `dew_point`   | °C   | Dew point, **calculated** from the same data ([details](#absolute-humidity-and-dew-point)) |
 
 Every sensor is optional and accepts all standard
 [Sensor](https://esphome.io/components/sensor/) options (`name`, `id`, `filters`, …).
@@ -30,7 +31,7 @@ Every sensor is optional and accepts all standard
 - [Configuration variables](#configuration-variables)
 - [Recommendations](#recommendations)
 - [Troubleshooting](#troubleshooting)
-- [Absolute humidity](#absolute-humidity)
+- [Absolute humidity and dew point](#absolute-humidity-and-dew-point)
 - [Protocol notes](#protocol-notes)
 
 ---
@@ -129,6 +130,8 @@ sensor:
       name: "GY39 Altitude"
     absolute_humidity:
       name: "GY39 Absolute Humidity"
+    dew_point:
+      name: "GY39 Dew Point"
 ```
 
 ### ESP8266
@@ -205,6 +208,8 @@ sensor:
       name: "GY39 Altitude"
     absolute_humidity:
       name: "GY39 Absolute Humidity"
+    dew_point:
+      name: "GY39 Dew Point"
 ```
 
 For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with the same `frequency: 50kHz`.
@@ -229,6 +234,7 @@ For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with 
 | `humidity`        | all  | no       | –       | Humidity sensor (%) |
 | `altitude`        | all  | no       | –       | Altitude sensor (m) |
 | `absolute_humidity` | all | no      | –       | Absolute humidity (g/m³), calculated |
+| `dew_point`       | all  | no       | –       | Dew point (°C), calculated |
 
 ---
 
@@ -292,7 +298,12 @@ logger:
 
 ---
 
-## Absolute humidity
+## Absolute humidity and dew point
+
+Both values are calculated on the ESP from the module's own temperature, RH and pressure,
+using the same reference-grade equations.
+
+### Absolute humidity
 
 `absolute_humidity` is the mass of water vapour per cubic metre of air (g/m³).
 The module does not measure it directly. The component calculates it on the ESP, in double precision,
@@ -333,6 +344,43 @@ temperature with an `offset` filter.
 | 30 °C, 100 % RH | 30.50 g/m³ |
 | 0 °C, 100 % RH | 4.87 g/m³ |
 | −10 °C, 80 % RH | 1.90 g/m³ |
+
+### Dew point
+
+`dew_point` follows the WMO definition: the temperature to which the air must be cooled,
+at constant pressure and constant water-vapour content, to become saturated **with respect to liquid water**.
+It is the exact solution of
+
+$$f(p,T_d)\cdot e_w(T_d) = e$$
+
+using the same $e_w$ (Wagner & Pruss / Murphy & Koop) and $f$ (Buck) as above.
+The equation is solved numerically: a Newton iteration starts from a Magnus estimate and is
+safeguarded by bisection in [−100 °C, t]. It converges to < 10⁻⁶ K, normally in 3–4 iterations.
+It does **not** use the Magnus approximation for the final result.
+Compared with an independent bisection solver over −40…85 °C, 5…100 % RH and 700…1100 hPa (1560 points),
+the largest difference is 9.3 × 10⁻⁷ K.
+
+- RH = 100 % (or above) → dew point = air temperature.
+- RH = 0 %, or dew point below −100 °C → `NaN`.
+- Below 0 °C the result is the dew point over **supercooled water**, as defined by WMO.
+  This is not the frost point, which is higher.
+
+**Accuracy.** As with absolute humidity, the limit is the sensor:
+
+| Conditions | ±3 % RH | ±1 °C | Combined (RSS) |
+|---|---|---|---|
+| 20 °C, 50 % RH (Td = 9.28 °C) | ±0.89 K | ±0.92 K | **±1.3 K** |
+| 25 °C, 60 % RH (Td = 16.71 °C) | ±0.79 K | ±0.94 K | **±1.2 K** |
+| 0 °C, 80 % RH (Td = −3.03 °C) | ±0.50 K | ±0.98 K | **±1.1 K** |
+
+| Check (1013.25 hPa) | Dew point |
+|---|---|
+| 20 °C, 50 % RH | 9.28 °C |
+| 25 °C, 60 % RH | 16.71 °C |
+| 30 °C, 80 % RH | 26.17 °C |
+| 35 °C, 30 % RH | 14.85 °C |
+| 0 °C, 50 % RH | −9.18 °C |
+| −10 °C, 80 % RH | −12.79 °C |
 
 ---
 

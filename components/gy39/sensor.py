@@ -21,6 +21,7 @@ from esphome.const import (
 
 CONF_ALTITUDE = "altitude"
 CONF_ABSOLUTE_HUMIDITY = "absolute_humidity"
+CONF_DEW_POINT = "dew_point"
 # Literal values so older ESPHome releases without these constants still work.
 DEVICE_CLASS_ABSOLUTE_HUMIDITY = "absolute_humidity"
 UNIT_GRAMS_PER_CUBIC_METER = "g/m³"
@@ -70,6 +71,13 @@ BASE_SCHEMA = cv.Schema(
             device_class=DEVICE_CLASS_ABSOLUTE_HUMIDITY,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_DEW_POINT): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            icon="mdi:thermometer-water",
+            accuracy_decimals=2,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
     }
 ).extend(cv.polling_component_schema("60s"))
 
@@ -106,6 +114,7 @@ async def to_code(config):
         (CONF_HUMIDITY, "set_humidity_sensor"),
         (CONF_ALTITUDE, "set_altitude_sensor"),
         (CONF_ABSOLUTE_HUMIDITY, "set_absolute_humidity_sensor"),
+        (CONF_DEW_POINT, "set_dew_point_sensor"),
     ):
         if key in config:
             sens = await sensor.new_sensor(config[key])

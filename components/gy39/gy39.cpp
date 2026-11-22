@@ -25,6 +25,7 @@ void GY39Component::dump_config() {
   LOG_SENSOR("  ", "Humidity", this->humidity_sensor_);
   LOG_SENSOR("  ", "Altitude", this->altitude_sensor_);
   LOG_SENSOR("  ", "Absolute Humidity", this->absolute_humidity_sensor_);
+  LOG_SENSOR("  ", "Dew Point", this->dew_point_sensor_);
 }
 
 // ---------------------------------------------------------------- absolute humidity
@@ -55,7 +56,12 @@ double GY39Component::saturation_vapor_pressure_water(double temperature_k) {
                   std::tanh(0.0415 * (T - 218.8)) * (53.878 - 1331.22 / T - 9.44523 * ln_t + 0.014025 * T));
 }
 
-double GY39Component::compute_absolute_humidity(double temperature_c, double rh_percent, double pressure_pa) {
+double GY39Component::enhancement_factor(double temperature_c, double pressure_pa) {
+  const double p_hpa = pressure_pa / 100.0;
+  return 1.0 + 1e-4 * (7.2 + p_hpa * (0.0320 + 5.9e-6 * temperature_c * temperature_c));
+}
+
+double GY39Component::vapor_pressure(double temperature_c, double rh_percent, double pressure_pa) {
   // Validity: BME280 operating range and range of the equations used.
   if (!std::isfinite(temperature_c) || !std::isfinite(rh_percent) || !std::isfinite(pressure_pa))
     return NAN;
@@ -65,16 +71,20 @@ double GY39Component::compute_absolute_humidity(double temperature_c, double rh_
     rh_percent = 0.0;
   if (rh_percent > 100.0)
     rh_percent = 100.0;
+  return rh_percent / 100.0 * enhancement_factor(temperature_c, pressure_pa) *
+         saturation_vapor_pressure_water(temperature_c + 273.15);
+}
+
+double GY39Component::compute_absolute_humidity(double temperature_c, double rh_percent, double pressure_pa) {
+  const double e = vapor_pressure(temperature_c, rh_percent, pressure_pa);
+  if (std::isnan(e))
+    return NAN;
 
   static const double R = 8.314462618;   // J/(mol·K), CODATA 2018
   static const double M_W = 18.01528e-3;  // kg/mol, molar mass of water
 
   const double t = temperature_c;
   const double T = t + 273.15;
-  const double p_hpa = pressure_pa / 100.0;
-
-  const double f = 1.0 + 1e-4 * (7.2 + p_hpa * (0.0320 + 5.9e-6 * t * t));
-  const double e = rh_percent / 100.0 * f * saturation_vapor_pressure_water(T);
   const double xv = e / pressure_pa;  // mole fraction of water vapour
 
   const double p_t = pressure_pa / T;
@@ -84,6 +94,53 @@ double GY39Component::compute_absolute_humidity(double temperature_c, double rh_
                    p_t * p_t * (1.83e-11 - 0.765e-8 * xv * xv);
 
   return e * M_W / (z * R * T) * 1000.0;  // kg/m³ -> g/m³
+}
+
+// Dew point (WMO): the temperature at which the air, cooled at constant pressure and
+// constant vapour content, becomes saturated with respect to liquid water:
+//     f(p, Td) * e_w(Td) = e
+// Solved numerically: Newton iteration on ln(), safeguarded by bisection in
+// [-100 °C, t]. Converges to < 1e-6 K, normally in 3-4 iterations.
+double GY39Component::compute_dew_point(double temperature_c, double rh_percent, double pressure_pa) {
+  const double e = vapor_pressure(temperature_c, rh_percent, pressure_pa);
+  if (std::isnan(e) || e <= 0.0)
+    return NAN;  // RH = 0 % has no dew point
+
+  const double ln_e = std::log(e);
+  auto g = [&](double td_c) {
+    return std::log(enhancement_factor(td_c, pressure_pa) * saturation_vapor_pressure_water(td_c + 273.15)) - ln_e;
+  };
+
+  double lo = -100.0;  // lower validity limit of Murphy & Koop is -150 °C
+  double hi = temperature_c;
+  if (g(lo) > 0.0)
+    return NAN;  // dew point below -100 °C
+  if (g(hi) <= 0.0)
+    return temperature_c;  // saturated (RH = 100 %)
+
+  // Initial guess: Magnus formula (Alduchov & Eskridge 1996).
+  const double gamma = std::log(rh_percent / 100.0) + 17.625 * temperature_c / (243.04 + temperature_c);
+  double td = 243.04 * gamma / (17.625 - gamma);
+  if (!(td > lo && td < hi))
+    td = 0.5 * (lo + hi);
+
+  for (int i = 0; i < 50; i++) {
+    const double gv = g(td);
+    if (gv > 0.0) {
+      hi = td;
+    } else {
+      lo = td;
+    }
+    const double h = 1e-4;
+    const double dg = (g(td + h) - g(td - h)) / (2.0 * h);
+    double next = td - gv / dg;
+    if (!(next > lo && next < hi))
+      next = 0.5 * (lo + hi);  // Newton step left the bracket -> bisect
+    if (std::fabs(next - td) < 1e-6)
+      return next;
+    td = next;
+  }
+  return td;
 }
 
 void GY39Component::publish_lux_(uint32_t raw) {
@@ -117,6 +174,16 @@ void GY39Component::publish_bme_(int16_t temp, uint32_t pressure, uint16_t humid
       this->absolute_humidity_sensor_->publish_state(static_cast<float>(ah));
     }
   }
+
+  if (this->dew_point_sensor_ != nullptr) {
+    double td = compute_dew_point(temp / 100.0, humidity / 100.0, pressure / 100.0);
+    if (std::isnan(td)) {
+      ESP_LOGW(TAG, "Inputs out of range, dew point not calculated");
+    } else {
+      ESP_LOGD(TAG, "Dew point: %.3f°C", td);
+    }
+    this->dew_point_sensor_->publish_state(static_cast<float>(td));
+  }
 }
 
 // ---------------------------------------------------------------- UART
@@ -143,7 +210,7 @@ void GY39UARTComponent::update() {
   this->want_lux_ = this->illuminance_sensor_ != nullptr;
   this->want_bme_ = this->temperature_sensor_ != nullptr || this->pressure_sensor_ != nullptr ||
                     this->humidity_sensor_ != nullptr || this->altitude_sensor_ != nullptr ||
-                    this->absolute_humidity_sensor_ != nullptr;
+                    this->absolute_humidity_sensor_ != nullptr || this->dew_point_sensor_ != nullptr;
   this->last_request_ = millis();
   this->send_command_(CMD_QUERY_ALL);
 }

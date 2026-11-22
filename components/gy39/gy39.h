@@ -23,6 +23,7 @@ class GY39Component : public PollingComponent {
   void set_humidity_sensor(sensor::Sensor *s) { this->humidity_sensor_ = s; }
   void set_altitude_sensor(sensor::Sensor *s) { this->altitude_sensor_ = s; }
   void set_absolute_humidity_sensor(sensor::Sensor *s) { this->absolute_humidity_sensor_ = s; }
+  void set_dew_point_sensor(sensor::Sensor *s) { this->dew_point_sensor_ = s; }
 
   /// Absolute humidity (water vapour mass concentration) in g/m³.
   /// @param temperature_c  air temperature in °C
@@ -30,6 +31,12 @@ class GY39Component : public PollingComponent {
   /// @param pressure_pa    total air pressure in Pa
   /// Returns NAN if the inputs are outside the valid range.
   static double compute_absolute_humidity(double temperature_c, double rh_percent, double pressure_pa);
+  /// Dew point over liquid water in °C (NAN if out of range or RH = 0).
+  static double compute_dew_point(double temperature_c, double rh_percent, double pressure_pa);
+  /// Actual water vapour pressure in Pa (NAN if inputs are out of range).
+  static double vapor_pressure(double temperature_c, double rh_percent, double pressure_pa);
+  /// Water vapour enhancement factor f(p, t) in moist air (Buck 1996).
+  static double enhancement_factor(double temperature_c, double pressure_pa);
   /// Saturation vapour pressure over (supercooled) liquid water in Pa, T in K.
   static double saturation_vapor_pressure_water(double temperature_k);
 
@@ -48,6 +55,7 @@ class GY39Component : public PollingComponent {
   sensor::Sensor *humidity_sensor_{nullptr};
   sensor::Sensor *altitude_sensor_{nullptr};
   sensor::Sensor *absolute_humidity_sensor_{nullptr};
+  sensor::Sensor *dew_point_sensor_{nullptr};
 };
 
 #ifdef GY39_USE_UART
