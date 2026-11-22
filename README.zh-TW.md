@@ -1,0 +1,301 @@
+# ESPHome GY-39 外部元件
+
+[English](README.md) | **繁體中文**
+
+這是給 **GY-39** 環境感測模組用的 [ESPHome](https://esphome.io) 外部元件（external component）。
+GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上板上 MCU 組成。
+本元件同時支援 **UART** 與 **I2C** 兩種介面。
+
+| 感測項目      | 單位 | 說明                          |
+|---------------|------|-------------------------------|
+| `illuminance` | lx   | 照度（0.045 – 188,000 lx）    |
+| `temperature` | °C   | 溫度                          |
+| `pressure`    | hPa  | 氣壓                          |
+| `humidity`    | %    | 相對濕度                      |
+| `altitude`    | m    | 模組依氣壓推算的海拔          |
+
+每一項都可以選擇要不要啟用，也都支援 ESPHome 一般 [Sensor](https://esphome.io/components/sensor/) 的設定（`name`、`id`、`filters` 等）。
+
+---
+
+## 目錄
+
+- [安裝](#安裝)
+- [UART 與 I2C 怎麼選](#uart-與-i2c-怎麼選)
+- [接線](#接線)
+- [UART 使用範例](#uart-使用範例)
+- [I2C 使用範例](#i2c-使用範例)
+- [設定選項](#設定選項)
+- [使用建議](#使用建議)
+- [疑難排解](#疑難排解)
+- [通訊協定說明](#通訊協定說明)
+
+---
+
+## 安裝
+
+```yaml
+external_components:
+  - source: github://ch155260/esphome-gy39@main
+    components: [gy39]
+```
+
+想固定在某個版本的話，把 `@main` 換成 tag 或 commit hash。
+
+---
+
+## UART 與 I2C 怎麼選
+
+模組用 **S0 腳**決定介面，而且只在**上電當下**讀取一次：
+
+| 上電時的 S0          | 模式 | YAML 的 `interface:` |
+|----------------------|------|----------------------|
+| 懸空（不接）         | UART（出廠預設） | `uart`（預設值） |
+| 接 **GND**           | I2C  | `i2c`                |
+
+- `interface:` 只是告訴 ESPHome 要用哪種方式跟模組溝通，**一定要和 S0 的接法一致**。
+- 改了 S0 之後，模組要**斷電再上電**。如果模組一直有供電，只重開 ESP 是沒有用的。
+- 一顆模組一次只能用一種模式，因為 CT/DR 兩支腳是共用的。
+  不過同一份設定裡，不同的模組可以混用不同模式。
+
+| | UART | I2C |
+|---|---|---|
+| 接線 | 要佔用 2 支專用腳位（TX/RX） | 可以和其他感測器共用 I2C 匯流排 |
+| 資料正確性 | 每一幀都會檢查校驗和 | 沒有校驗 |
+| 設定難度 | 接上就能用 | S0 要接地，匯流排也要降速 |
+| 接多顆模組 | 每顆各用一組 UART | 每條匯流排只能接一顆（位址固定 0x5B） |
+| **適合誰** | **大多數人** | 腳位不夠用，或想共用現有的 I2C 匯流排 |
+
+---
+
+## 接線
+
+| GY-39 腳位 | UART 模式                       | I2C 模式                  |
+|------------|---------------------------------|---------------------------|
+| VCC        | 3.3 V 或 5 V                    | 3.3 V 或 5 V              |
+| GND        | GND                             | GND                       |
+| CT         | 模組 **TX** → ESP 的 **RX** 腳  | **SCL**                   |
+| DR         | 模組 **RX** → ESP 的 **TX** 腳  | **SDA**                   |
+| S0         | 懸空                            | **接 GND（上電前接好）**  |
+
+> UART 的 TX/RX 要**交叉接**：模組的 TX（CT）接 ESP 的 RX，模組的 RX（DR）接 ESP 的 TX。
+
+---
+
+## UART 使用範例
+
+### ESP32
+
+ESP32 有多組閒置的硬體 UART，設定最簡單。
+
+```yaml
+esphome:
+  name: gy39-uart
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+external_components:
+  - source: github://ch155260/esphome-gy39@main
+    components: [gy39]
+
+uart:
+  id: gy39_uart
+  tx_pin: GPIO17   # 接 GY-39 的 DR（模組 RX）
+  rx_pin: GPIO16   # 接 GY-39 的 CT（模組 TX）
+  baud_rate: 9600  # 出廠預設
+
+sensor:
+  - platform: gy39
+    interface: uart        # 預設值，可以省略
+    uart_id: gy39_uart
+    update_interval: 10s
+    illuminance:
+      name: "GY39 照度"
+    temperature:
+      name: "GY39 溫度"
+    pressure:
+      name: "GY39 氣壓"
+    humidity:
+      name: "GY39 濕度"
+    altitude:
+      name: "GY39 海拔"
+```
+
+### ESP8266
+
+ESP8266 只有一組完整的硬體 UART（GPIO1/GPIO3），而且預設被 logger 佔用。
+有兩種做法，第一種是關掉 logger 的序列埠輸出：
+
+```yaml
+logger:
+  baud_rate: 0          # 把硬體 UART0 讓給感測器
+
+uart:
+  id: gy39_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+```
+
+第二種是保留序列埠 log，改用軟體序列埠：
+
+```yaml
+uart:
+  id: gy39_uart
+  tx_pin: GPIO14        # D5，軟體序列埠
+  rx_pin: GPIO12        # D6，軟體序列埠
+  baud_rate: 9600       # 軟體序列埠跑 9600 沒有問題
+```
+
+**UART 模式運作方式：** 每到一次 `update_interval`，元件就送出「查詢一次」指令 `A5 53 F8`，
+收到照度和 BME280 兩個回應幀之後發布數值。
+如果模組處於連續輸出模式，多出來的幀會被忽略，所以仍然只會照 `update_interval` 更新。
+
+---
+
+## I2C 使用範例
+
+1. 先把 **S0 接 GND**，再讓模組上電。
+2. I2C 匯流排的頻率要調低。
+
+```yaml
+esphome:
+  name: gy39-i2c
+
+esp8266:
+  board: d1_mini
+
+logger:
+
+external_components:
+  - source: github://ch155260/esphome-gy39@main
+    components: [gy39]
+
+i2c:
+  sda: GPIO4        # D2，接 GY-39 的 DR
+  scl: GPIO5        # D1，接 GY-39 的 CT
+  frequency: 50kHz  # 建議值，模組上的 MCU 回應比較慢
+  scan: true        # 開機時 log 應該會掃到 0x5B
+
+sensor:
+  - platform: gy39
+    interface: i2c
+    address: 0x5B   # 預設值，可以省略
+    update_interval: 10s
+    illuminance:
+      name: "GY39 照度"
+    temperature:
+      name: "GY39 溫度"
+    pressure:
+      name: "GY39 氣壓"
+    humidity:
+      name: "GY39 濕度"
+    altitude:
+      name: "GY39 海拔"
+```
+
+ESP32 可以用任意兩支 GPIO，例如 `sda: GPIO21`、`scl: GPIO22`，頻率一樣設 `frequency: 50kHz`。
+
+**I2C 模式運作方式：** 每到一次 `update_interval`，元件用一次傳輸讀取暫存器 `0x00`–`0x0D`（共 14 bytes），
+然後發布所有已啟用的感測值。
+
+---
+
+## 設定選項
+
+| 選項              | 模式 | 必填 | 預設值  | 說明 |
+|-------------------|------|------|---------|------|
+| `interface`       | 全部 | 否   | `uart`  | `uart` 或 `i2c` |
+| `uart_id`         | UART | 否\* | –       | `uart:` 匯流排的 ID（\*定義了多組 UART 時才需要） |
+| `i2c_id`          | I2C  | 否\* | –       | `i2c:` 匯流排的 ID（\*定義了多條匯流排時才需要） |
+| `address`         | I2C  | 否   | `0x5B`  | I2C 位址 |
+| `update_interval` | 全部 | 否   | `60s`   | 讀取並發布數值的間隔 |
+| `illuminance`     | 全部 | 否   | –       | 照度（lx） |
+| `temperature`     | 全部 | 否   | –       | 溫度（°C） |
+| `pressure`        | 全部 | 否   | –       | 氣壓（hPa） |
+| `humidity`        | 全部 | 否   | –       | 濕度（%） |
+| `altitude`        | 全部 | 否   | –       | 海拔（m） |
+
+---
+
+## 使用建議
+
+- **沒有特別需求就用 UART**：它是出廠預設，不用額外接線，每一幀也都有校驗和檢查。
+- **`update_interval`**：環境數據設 10 s – 60 s 就很夠用了。
+  建議不要低於 2 s 左右，因為模組本身每秒只更新幾次。
+- **I2C 速度**：建議 **50 kHz**，最多不要超過 100 kHz。模組上的 MCU 回應比較慢，速度太快容易讀取失敗。
+- **I2C 上拉電阻**：大部分 GY-39 板子上已經有上拉電阻。
+  如果線比較長，或匯流排上接了很多裝置，可以另外加 4.7 kΩ 上拉到 3.3 V。
+- **供電**：板子上有穩壓 IC，3.3 V 和 5 V 都能用。
+  訊號電位會跟著 VCC 走，所以**接 ESP 的時候建議用 3.3 V 供電**，讓訊號維持在 3.3 V。
+- **溫度準確度**：BME280 會被附近的電路加熱而偏高。
+  模組要裝在離 ESP 和穩壓 IC 遠一點的地方，或者用濾波器修正：
+
+  ```yaml
+  temperature:
+    name: "GY39 溫度"
+    filters:
+      - offset: -1.5
+  ```
+
+- **照度數值跳動時可以做平滑處理**：
+
+  ```yaml
+  illuminance:
+    name: "GY39 照度"
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+  ```
+
+- **海拔**是模組用標準海平面氣壓推算的，只能當作粗略參考，用不到的話可以不要啟用。
+
+---
+
+## 疑難排解
+
+| 狀況 | 可能原因／解法 |
+|---|---|
+| UART：`Timeout waiting for GY-39 response` | TX/RX 沒有交叉接、`baud_rate` 設錯、logger 佔用了 UART0（ESP8266），或是 S0 接了地（變成 I2C 模式） |
+| UART：`Checksum mismatch` | 雜訊干擾或鮑率不一致。把線縮短，並確認有共地 |
+| UART：改過鮑率之後收不到資料 | 如果之前送過 115200 的指令（`A5 AF 54`），要把 `baud_rate` 改成 `115200` |
+| I2C：`Communication with GY-39 failed` | S0 沒有在**上電前**接地。把模組斷電重開，並確認 `scan: true` 有掃到 0x5B |
+| I2C：偶爾讀取失敗 | 把 `frequency` 再調低（例如 50 kHz 或 20 kHz）、縮短線長、加上拉電阻 |
+| 溫度偏高 | 自熱問題，請參考[使用建議](#使用建議) |
+
+想看原始數值的話，可以打開詳細 log：
+
+```yaml
+logger:
+  level: DEBUG
+  logs:
+    gy39: DEBUG
+```
+
+---
+
+## 通訊協定說明
+
+**UART 資料幀**（模組 → 主機，校驗和 = 前面所有 bytes 相加後取低 8 位）：
+
+| 幀 | 內容 |
+|---|---|
+| 照度   | `5A 5A 15 04` LUX(4, ÷100) `SUM` |
+| BME280 | `5A 5A 45 0A` TEMP(2, 有號, ÷100) PRESS(4, ÷100 Pa) HUM(2, ÷100) ALT(2, m) `SUM` |
+
+**指令**（主機 → 模組）：`A5 53 F8` = 查詢一次照度和 BME280（本元件使用的指令）。
+
+**I2C 暫存器**（位址 0x5B，big-endian）：`0x00–0x03` 照度×100、`0x04–0x05` 溫度×100、
+`0x06–0x09` 氣壓 Pa×100、`0x0A–0x0B` 濕度×100、`0x0C–0x0D` 海拔 m。
+
+---
+
+## 授權
+
+[MIT](LICENSE)
