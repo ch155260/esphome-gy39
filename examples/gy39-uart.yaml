@@ -1,0 +1,39 @@
+esphome:
+  name: gy39-uart
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    # 從 GitHub 使用時改成：
+    # source: github://ch155260/esphome-gy39@main
+    components: [gy39]
+
+uart:
+  id: gy39_uart
+  tx_pin: GPIO17   # 接 GY-39 的 RX (DR)
+  rx_pin: GPIO16   # 接 GY-39 的 TX (CT)
+  baud_rate: 9600
+
+sensor:
+  - platform: gy39
+    interface: uart
+    uart_id: gy39_uart
+    update_interval: 10s
+    illuminance:
+      name: "GY39 Illuminance"
+    temperature:
+      name: "GY39 Temperature"
+    pressure:
+      name: "GY39 Pressure"
+    humidity:
+      name: "GY39 Humidity"
+    altitude:
+      name: "GY39 Altitude"
