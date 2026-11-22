@@ -6,32 +6,49 @@ An [ESPHome](https://esphome.io) external component for the **GY-39** environmen
 (MAX44009 ambient light + BME280 temperature / humidity / pressure, with an on-board MCU).
 Both **UART** and **I2C** interfaces are supported.
 
+**Measured by the module**
+
 | Sensor key    | Unit | Description                                       |
 |---------------|------|---------------------------------------------------|
 | `illuminance` | lx   | Ambient light (0.045 – 188,000 lx)                |
 | `temperature` | °C   | Temperature                                       |
-| `pressure`    | hPa  | Barometric pressure                               |
 | `humidity`    | %    | Relative humidity                                 |
-| `altitude`    | m    | Altitude estimated by the module from pressure    |
-| `absolute_humidity` | g/m³ | Water vapour density, **calculated** from temperature, RH and pressure ([details](#absolute-humidity-and-dew-point)) |
-| `dew_point`   | °C   | Dew point, **calculated** from the same data ([details](#absolute-humidity-and-dew-point)) |
+| `pressure`    | hPa  | Barometric (station) pressure                     |
+| `altitude`    | m    | Altitude estimated by the module, integer metres. *Not recommended*, see [Which values to trust](#which-values-to-trust) |
+
+**Calculated by this component** (see [Calculated values](#calculated-values))
+
+| Sensor key           | Unit | Description |
+|----------------------|------|-------------|
+| `dew_point`          | °C   | Dew point (WMO, over liquid water) |
+| `absolute_humidity`  | g/m³ | Water vapour density |
+| `mixing_ratio`       | g/kg | Mass of water vapour per kilogram of dry air |
+| `sea_level_pressure` | hPa  | Pressure reduced to mean sea level (needs `station_altitude`) |
+| `pressure_trend_3h`  | hPa  | Pressure change over the last 3 hours (WMO standard) |
+| `pressure_trend_24h` | hPa  | Pressure change over the last 24 hours (removes the daily pressure cycle) |
+| `pressure_tendency`  | text | Tendency description, e.g. "Falling slowly" (text sensor) |
 
 Every sensor is optional and accepts all standard
 [Sensor](https://esphome.io/components/sensor/) options (`name`, `id`, `filters`, …).
+Calculated values are only computed when they are configured.
 
 ---
 
 ## Table of contents
 
 - [Installation](#installation)
+- [Recommended configuration](#recommended-configuration)
 - [Choosing UART or I2C](#choosing-uart-or-i2c)
 - [Wiring](#wiring)
 - [UART example](#uart-example)
 - [I2C example](#i2c-example)
 - [Configuration variables](#configuration-variables)
 - [Recommendations](#recommendations)
+- [Mounting location](#mounting-location)
+- [Calibration](#calibration)
 - [Troubleshooting](#troubleshooting)
-- [Absolute humidity and dew point](#absolute-humidity-and-dew-point)
+- [Calculated values](#calculated-values)
+  - [Which values to trust](#which-values-to-trust)
 - [Protocol notes](#protocol-notes)
 
 ---
@@ -45,6 +62,54 @@ external_components:
 ```
 
 To pin a specific version, replace `@main` with a tag or commit hash.
+
+---
+
+## Recommended configuration
+
+This set contains only values with a high reference value
+(see [Which values to trust](#which-values-to-trust)). Add the `uart:` or `i2c:` bus from the examples below.
+
+```yaml
+sensor:
+  - platform: gy39
+    interface: uart            # or i2c
+    uart_id: gy39_uart
+    update_interval: 60s
+    station_altitude: 35       # m above sea level = ground elevation + mounting height
+    tendency_language: en      # or zh-TW
+    # Calibration, see "Calibration". Applied before every calculated value.
+    # temperature_offset: -0.8
+    # humidity_calibration:
+    #   - 34.0 -> 32.8
+    #   - 77.5 -> 75.3
+
+    # Measured
+    temperature:
+      name: "Temperature"
+    humidity:
+      name: "Humidity"
+    pressure:
+      name: "Pressure"
+    illuminance:
+      name: "Illuminance"
+
+    # Calculated (not affected by self-heating, high reference value)
+    dew_point:
+      name: "Dew Point"
+    absolute_humidity:
+      name: "Absolute Humidity"
+    mixing_ratio:
+      name: "Mixing Ratio"
+    sea_level_pressure:
+      name: "Sea Level Pressure"
+    pressure_trend_3h:
+      name: "Pressure Trend 3h"
+    pressure_trend_24h:
+      name: "Pressure Trend 24h"
+    pressure_tendency:
+      name: "Pressure Tendency"
+```
 
 ---
 
@@ -117,7 +182,8 @@ sensor:
   - platform: gy39
     interface: uart        # default, may be omitted
     uart_id: gy39_uart
-    update_interval: 10s
+    update_interval: 60s
+    station_altitude: 35   # m above sea level, required for sea_level_pressure
     illuminance:
       name: "GY39 Illuminance"
     temperature:
@@ -126,8 +192,8 @@ sensor:
       name: "GY39 Pressure"
     humidity:
       name: "GY39 Humidity"
-    altitude:
-      name: "GY39 Altitude"
+    sea_level_pressure:
+      name: "GY39 Sea Level Pressure"
     absolute_humidity:
       name: "GY39 Absolute Humidity"
     dew_point:
@@ -195,7 +261,8 @@ sensor:
   - platform: gy39
     interface: i2c
     address: 0x5B   # default, may be omitted
-    update_interval: 10s
+    update_interval: 60s
+    station_altitude: 35   # m above sea level, required for sea_level_pressure
     illuminance:
       name: "GY39 Illuminance"
     temperature:
@@ -204,8 +271,8 @@ sensor:
       name: "GY39 Pressure"
     humidity:
       name: "GY39 Humidity"
-    altitude:
-      name: "GY39 Altitude"
+    sea_level_pressure:
+      name: "GY39 Sea Level Pressure"
     absolute_humidity:
       name: "GY39 Absolute Humidity"
     dew_point:
@@ -232,9 +299,19 @@ For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with 
 | `temperature`     | all  | no       | –       | Temperature sensor (°C) |
 | `pressure`        | all  | no       | –       | Pressure sensor (hPa) |
 | `humidity`        | all  | no       | –       | Humidity sensor (%) |
-| `altitude`        | all  | no       | –       | Altitude sensor (m) |
-| `absolute_humidity` | all | no      | –       | Absolute humidity (g/m³), calculated |
+| `altitude`        | all  | no       | –       | Altitude sensor (m), from the module |
 | `dew_point`       | all  | no       | –       | Dew point (°C), calculated |
+| `absolute_humidity` | all | no      | –       | Absolute humidity (g/m³), calculated |
+| `mixing_ratio`    | all  | no       | –       | Mixing ratio (g/kg), calculated |
+| `sea_level_pressure` | all | no     | –       | Sea-level pressure (hPa), calculated. Requires `station_altitude` |
+| `station_altitude` | all | with `sea_level_pressure` | – | Height of the **sensor** above mean sea level in m (−500 … 9000) |
+| `pressure_trend_3h` | all | no      | –       | Pressure change over 3 h (hPa) |
+| `pressure_trend_24h` | all | no     | –       | Pressure change over 24 h (hPa) |
+| `pressure_tendency` | all | no      | –       | Text sensor with the tendency description |
+| `tendency_language` | all | no      | `en`    | `en` or `zh-TW` for `pressure_tendency` |
+| `temperature_offset` | all | no     | `0`     | °C added to the temperature. RH is re-evaluated, see [Calibration](#calibration) |
+| `humidity_calibration` | all | no   | –       | 1 or 2 points `measured -> true` (%RH) |
+| `pressure_offset` | all  | no       | `0`     | hPa added to the pressure |
 
 ---
 
@@ -251,14 +328,10 @@ For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with 
 - **Power:** the board has its own regulator, so 3.3 V or 5 V both work.
   The logic level follows VCC, so **power it from 3.3 V when connected to an ESP** to keep the signals at 3.3 V.
 - **Temperature accuracy:** the BME280 is self-heated by nearby electronics.
-  Mount the module away from the ESP and voltage regulators, or correct it with a filter:
-
-  ```yaml
-  temperature:
-    name: "GY39 Temperature"
-    filters:
-      - offset: -1.5
-  ```
+  Mount the module away from the ESP and voltage regulators (see [Mounting location](#mounting-location)),
+  and correct any remaining offset with `temperature_offset` (see [Calibration](#calibration)).
+  Do **not** use a `filters: - offset:` on the temperature sensor for this: filters only change the published
+  temperature, not the calculated values.
 
 - **Smoothing noisy light readings:**
 
@@ -271,8 +344,81 @@ For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with 
           send_every: 1
   ```
 
-- **Altitude** is calculated by the module from a standard sea-level pressure,
-  so it is only a rough estimate. Disable it if you don't need it.
+- **Altitude** is calculated by the module from a fixed 1013.25 hPa reference, in whole metres,
+  and drifts with the weather by 80–250 m. Use `sea_level_pressure` and the pressure trends instead.
+
+---
+
+## Mounting location
+
+Where the module is mounted affects the readings more than any formula. General rules:
+
+| Factor | Effect | What to do |
+|---|---|---|
+| **Direct sunlight** | The sensor heats up by several °C, so temperature reads high and RH reads low | Put it in a **radiation shield**: a white, louvered, ventilated housing (like a Stevenson screen) |
+| **Rain and splashing water** | Wet sensor: RH stuck at 100 %, corrosion | Keep it under a roof, with the sensor opening facing **down**. Never seal it airtight. A PTFE vent membrane is fine |
+| **Heat sources** | Self-heating or local warm air | Keep it ≥ 5 cm from the ESP and its regulator (put the module on a cable). Stay away from water heaters, dryers and lamps |
+| **Directly under a ceiling** | Warm air collects there (stratification) and a sunlit roof slab radiates heat | Hang it **20–30 cm below** the ceiling, not touching it |
+| **Long periods of RH > 90 % or condensation** | The BME280 can read high for hours afterwards and drift over time | Ventilated housing, away from steam sources |
+| **Light sensor orientation** | The MAX44009 sits on the top side of the board. Facing down, it measures reflected light | Use `illuminance` as a **relative** brightness indicator, or mount a second module facing the sky |
+| **Cable length** | I2C fails on long wires | UART at 9600 baud works over several metres. Keep I2C under about 30–50 cm |
+
+Values that depend only on the **water content** of the air (dew point, mixing ratio)
+and pressure-based values are hardly affected by heating of the sensor. See [Which values to trust](#which-values-to-trust).
+
+**`station_altitude`** is the height of the **sensor**, not of the ground: ground elevation + floor height.
+For example, ground 20 m + 4th floor (about 3 m per floor, so 9 m) + 2.5 m below the ceiling gives about 31 m.
+An error of 1 m changes the sea-level pressure by only about 0.12 hPa.
+
+---
+
+## Calibration
+
+ESPHome `filters` on `temperature` / `humidity` only change the published values.
+The calculated values (dew point, absolute humidity, …) use the raw readings.
+So this component has built-in calibration options that are applied **before** every calculation:
+
+```yaml
+    temperature_offset: -0.8      # °C
+    humidity_calibration:         # 'measured -> true', 1 point = offset, 2 points = linear
+      - 34.0 -> 32.8
+      - 77.5 -> 75.3
+    pressure_offset: 0.0          # hPa
+```
+
+**Order of operations (physically consistent):**
+
+1. `humidity_calibration` is applied to the raw RH. This RH is measured at the sensor's own temperature.
+2. The vapour pressure *e* is calculated from the raw temperature and the calibrated RH.
+3. `temperature_offset` is applied.
+4. RH is **re-evaluated at the corrected temperature with *e* kept constant**.
+   A warm sensor does not change how much water is in the air.
+
+So a `temperature_offset` that corrects self-heating also corrects RH, and leaves dew point and mixing ratio unchanged.
+Example: the air is 25 °C / 60 %, and the sensor heated to 27 °C reads 53.3 %.
+With `temperature_offset: -2` the component publishes 25.00 °C / 60.00 %.
+
+**Humidity: saturated salt test (cheap and reliable)**
+
+1. Put a few spoons of salt in a small cup and add only enough water to make a damp slurry. Some salt must stay undissolved.
+2. Put the cup and the module (not the ESP) in an airtight box, at a stable room temperature away from sunlight.
+3. Wait 6–12 hours, then note the RH reading.
+4. Repeat with a second salt for a two-point calibration.
+
+| Salt | Equilibrium RH at 25 °C (Greenspan 1977) |
+|---|---|
+| Sodium chloride, NaCl (table salt) | **75.3 %** |
+| Magnesium chloride, MgCl₂ | **32.8 %** |
+
+Then set, for example, `humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]`.
+Do this test **before** setting `temperature_offset`, with `temperature_offset` at 0.
+
+**Temperature:** place a trusted thermometer next to the module (in the shade, with air movement),
+compare the readings over a few hours, and set `temperature_offset` to the average difference.
+
+**Pressure:** compare `sea_level_pressure` with a nearby official weather station over several days
+(only at times with little weather change). Set `pressure_offset` to the average difference.
+The trends do not need this, because a constant offset cancels out.
 
 ---
 
@@ -298,10 +444,11 @@ logger:
 
 ---
 
-## Absolute humidity and dew point
+## Calculated values
 
-Both values are calculated on the ESP from the module's own temperature, RH and pressure,
-using the same reference-grade equations.
+All values are calculated on the ESP in double precision from the (calibrated) temperature, RH and pressure
+of the same reading. Wherever possible they use reference-grade equations instead of approximations.
+Every equation was checked on a host computer against an independent implementation.
 
 ### Absolute humidity
 
@@ -381,6 +528,108 @@ the largest difference is 9.3 × 10⁻⁷ K.
 | 35 °C, 30 % RH | 14.85 °C |
 | 0 °C, 50 % RH | −9.18 °C |
 | −10 °C, 80 % RH | −12.79 °C |
+
+---
+
+### Mixing ratio
+
+$$w = \varepsilon\,\frac{e}{p-e}, \qquad \varepsilon = M_w/M_a = 0.621945$$
+
+(ASHRAE Fundamentals), with *e* calculated exactly as for absolute humidity. Unit g/kg of dry air.
+Unlike absolute humidity, the mixing ratio does not change when the same air is heated, cooled or compressed.
+This makes it the fairest way to compare indoor and outdoor air, or two rooms.
+Example: 25 °C, 60 % RH, 1013.25 hPa → **11.95 g/kg**.
+Accuracy: about ±8 % (from ±3 % RH and ±1 °C), and it is **not affected by self-heating**.
+
+### Sea-level pressure
+
+Reduction formula of the Deutscher Wetterdienst (DWD):
+
+$$p_0 = p\cdot\exp\!\left(\frac{g\,h}{R_d\,T_h}\right),\qquad T_h = T + C_h\,E + \frac{a\,h}{2}$$
+
+| Symbol | Value |
+|---|---|
+| $g$ | 9.80665 m/s² |
+| $R_d$ | 287.05 J/(kg·K) |
+| $a$ | 0.0065 K/m (mean temperature lapse rate) |
+| $C_h$ | 0.12 K/hPa (humidity correction) |
+| $E$ | vapour pressure in hPa (calculated exactly) |
+| $h$ | `station_altitude` |
+
+Unlike the simple barometric formula, it corrects for humidity. The difference is 0.13 hPa at 120 m.
+Accuracy: ±1 hPa (BME280 absolute accuracy), plus 0.12 hPa per metre of error in `station_altitude`.
+With a `pressure_offset` determined against an official station, the result can be compared with
+weather service values to a few tenths of a hPa.
+
+### Pressure trends and tendency
+
+The component keeps **10-minute means** of the station pressure for 24 hours
+(145 values, about 0.6 kB RAM). It publishes, every 10 minutes:
+
+- `pressure_trend_3h`: the latest 10-minute mean minus the one 3 h earlier. Available after **about 3 h 10 min**.
+- `pressure_trend_24h`: the same over 24 h. Available after **about 24 h 10 min**.
+- `pressure_tendency`: a text description of the 3 h change, using the UK Met Office / WMO terms.
+
+| 3 h change (hPa) | `en` | `zh-TW` |
+|---|---|---|
+| < 0.1 | Steady | 平穩 |
+| 0.1 – 1.5 | Rising / Falling slowly | 緩慢上升／下降 |
+| 1.6 – 3.5 | Rising / Falling | 上升／下降 |
+| 3.6 – 6.0 | Rising / Falling quickly | 快速上升／下降 |
+| > 6.0 | Rising / Falling very rapidly | 非常快速上升／下降 |
+
+Before enough history exists, the trends are `NaN` and the text is "Collecting data". The history is kept
+in RAM only, so it restarts after a reboot. Bins without any reading (for example during a Wi-Fi outage
+or an `update_interval` longer than 10 min) are stored as `NaN` and never interpolated.
+
+Accuracy: trends use differences, so the absolute error cancels out. What remains is the BME280
+**relative accuracy of ±0.12 hPa**, which makes the trends the most accurate output of the module.
+
+**Daily pressure cycle (important in the tropics and subtropics, including Taiwan):**
+even in perfectly stable weather, pressure rises and falls about ±1 hPa twice a day
+(semidiurnal atmospheric tide). Maxima are around 10:00 and 22:00, minima around 04:00 and 16:00 local time.
+So a 3 h change of up to 1–2 hPa can be completely normal.
+The **24 h trend** compares the same time of day and cancels this cycle.
+Practical thresholds for weather alerts:
+
+- 3 h fall > 3 hPa, or 24 h fall > 5 hPa → a weather system is approaching
+- 3 h fall > 6 hPa → strong system (for example a typhoon)
+
+A pressure trend is an indicator, not a forecast. Convective showers, for example, often show no pressure signal.
+Don't move the sensor: 10 m of height is about 1.2 hPa.
+
+### Which values to trust
+
+The equations add negligible error. What matters is how the BME280's errors
+(±1 °C, ±3 % RH, ±1 hPa absolute, ±0.12 hPa relative) propagate, and how the value reacts to
+**self-heating** of the sensor (by the ESP, the sun or a warm ceiling).
+
+Propagated uncertainty at 25 °C, 60 % RH, 1013 hPa, and the error caused by +2 K of self-heating:
+
+| Value | Uncertainty (spec) | Error from +2 K self-heating | Reference value |
+|---|---|---|---|
+| `pressure_trend_3h` / `_24h` | ±0.12 hPa (relative) | none | 🟢 high |
+| `pressure`, `sea_level_pressure` | ±1 hPa | none | 🟢 high |
+| `dew_point` | ±1.2 K | **0** | 🟢 high |
+| `mixing_ratio` | ±8 % | **0** | 🟢 high |
+| `absolute_humidity` | ±7.5 % | −0.7 % | 🟢 high |
+| `temperature` | ±1 °C | **+2 K** | 🟠 only after good mounting and calibration |
+| `humidity` (RH) | ±3 % RH | **−6.7 % RH** | 🟠 only after good mounting and calibration |
+| `altitude` (from the module) | ±8 m, drifts 80–250 m with the weather | none | 🔴 low |
+
+Why are dew point and mixing ratio immune to self-heating? The BME280 measures temperature and humidity on the
+same chip. When the chip is warmer than the air, it reads a higher temperature and a correspondingly lower RH,
+but the vapour pressure *e* calculated from both is unchanged. Every value that depends only on *e* stays correct.
+
+Not provided on purpose:
+
+- **VPD**: +31 % error from 2 K of self-heating, and ±31 % at high RH.
+- **Heat index**: an empirical formula that amplifies a 1 °C error to more than 3 °C.
+- **Wet-bulb temperature, enthalpy, Humidex**: all sensitive to self-heating.
+- **PPFD from lux**: needs the light spectrum.
+
+The uncertainties assume independent errors within the BME280's 20–80 % RH range, and are theoretical.
+They have not been verified against reference instruments.
 
 ---
 

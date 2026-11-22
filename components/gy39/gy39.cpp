@@ -26,6 +26,15 @@ void GY39Component::dump_config() {
   LOG_SENSOR("  ", "Altitude", this->altitude_sensor_);
   LOG_SENSOR("  ", "Absolute Humidity", this->absolute_humidity_sensor_);
   LOG_SENSOR("  ", "Dew Point", this->dew_point_sensor_);
+  LOG_SENSOR("  ", "Mixing Ratio", this->mixing_ratio_sensor_);
+  LOG_SENSOR("  ", "Sea Level Pressure", this->sea_level_pressure_sensor_);
+  if (this->sea_level_pressure_sensor_ != nullptr)
+    ESP_LOGCONFIG(TAG, "    Station altitude: %.1f m", this->station_altitude_);
+  LOG_SENSOR("  ", "Pressure Trend 3h", this->pressure_trend_3h_sensor_);
+  LOG_SENSOR("  ", "Pressure Trend 24h", this->pressure_trend_24h_sensor_);
+  LOG_TEXT_SENSOR("  ", "Pressure Tendency", this->pressure_tendency_text_sensor_);
+  ESP_LOGCONFIG(TAG, "  Calibration: T offset %.2f°C, RH = %.4f * raw %+.2f, p offset %+.2f hPa",
+                this->temperature_offset_, this->humidity_gain_, this->humidity_offset_, this->pressure_offset_);
 }
 
 // ---------------------------------------------------------------- absolute humidity
@@ -143,6 +152,132 @@ double GY39Component::compute_dew_point(double temperature_c, double rh_percent,
   return td;
 }
 
+void GY39Component::apply_calibration(double t_raw, double rh_raw, double p_pa, double t_offset, double rh_gain,
+                                      double rh_offset, double *t_out, double *rh_out) {
+  double rh_cal = rh_gain * rh_raw + rh_offset;
+  if (rh_cal < 0.0)
+    rh_cal = 0.0;
+  if (rh_cal > 100.0)
+    rh_cal = 100.0;
+  const double t = t_raw + t_offset;
+  double rh = rh_cal;
+  if (t_offset != 0.0) {
+    const double e = vapor_pressure(t_raw, rh_cal, p_pa);
+    if (std::isfinite(e) && t > -100.0) {
+      rh = e / (enhancement_factor(t, p_pa) * saturation_vapor_pressure_water(t + 273.15)) * 100.0;
+      if (rh > 100.0)
+        rh = 100.0;
+    }
+  }
+  *t_out = t;
+  *rh_out = rh;
+}
+
+// Mixing ratio w = eps * e / (p - e), eps = M_w / M_a = 0.621945 (ASHRAE Fundamentals).
+double GY39Component::compute_mixing_ratio(double temperature_c, double rh_percent, double pressure_pa) {
+  const double e = vapor_pressure(temperature_c, rh_percent, pressure_pa);
+  if (std::isnan(e) || e >= pressure_pa)
+    return NAN;
+  return 0.621945 * e / (pressure_pa - e) * 1000.0;  // kg/kg -> g/kg
+}
+
+// Reduction to mean sea level, Deutscher Wetterdienst formula:
+//   p0 = p * exp( g * h / (R_d * T_h) ),   T_h = T + C_h * E + a * h / 2
+// g = 9.80665 m/s², R_d = 287.05 J/(kg·K), a = 0.0065 K/m (mean lapse rate),
+// C_h = 0.12 K/hPa (humidity correction), E = vapour pressure in hPa.
+double GY39Component::compute_sea_level_pressure(double temperature_c, double rh_percent, double pressure_pa,
+                                                 double station_altitude_m) {
+  if (std::isnan(station_altitude_m))
+    return NAN;
+  const double e = vapor_pressure(temperature_c, rh_percent, pressure_pa);
+  if (std::isnan(e))
+    return NAN;
+  const double t_h = temperature_c + 273.15 + 0.12 * (e / 100.0) + 0.0065 * station_altitude_m / 2.0;
+  return pressure_pa * std::exp(9.80665 * station_altitude_m / (287.05 * t_h));
+}
+
+// UK Met Office / WMO barometric tendency descriptors (change over 3 hours):
+//   < 0.1 hPa steady, 0.1-1.5 slowly, 1.6-3.5 (normal), 3.6-6.0 quickly, > 6.0 very rapidly.
+int GY39Component::tendency_class(double change_3h_hpa) {
+  const double a = std::round(std::fabs(change_3h_hpa) * 10.0) / 10.0;  // descriptors use 0.1 hPa steps
+  int level;
+  if (a < 0.1) {
+    level = 0;
+  } else if (a <= 1.5) {
+    level = 1;
+  } else if (a <= 3.5) {
+    level = 2;
+  } else if (a <= 6.0) {
+    level = 3;
+  } else {
+    level = 4;
+  }
+  return change_3h_hpa < 0 ? -level : level;
+}
+
+float GY39Component::history_ago_(uint16_t bins) const {
+  if (bins >= this->history_count_)
+    return NAN;
+  uint16_t idx = (this->history_head_ + HISTORY_BINS - 1 - bins) % HISTORY_BINS;
+  return this->history_[idx];
+}
+
+void GY39Component::update_pressure_history_(double pressure_pa) {
+  const uint32_t now = millis();
+  if (!this->bin_started_) {
+    this->bin_started_ = true;
+    this->bin_start_ = now;
+  }
+  // Close every 10-minute bin that has ended (empty bins are stored as NAN).
+  bool closed = false;
+  uint16_t guard = 0;
+  while (now - this->bin_start_ >= BIN_MS && guard++ < HISTORY_BINS) {
+    float mean = this->bin_n_ > 0 ? static_cast<float>(this->bin_sum_ / this->bin_n_) : NAN;
+    this->history_[this->history_head_] = mean;
+    this->history_head_ = (this->history_head_ + 1) % HISTORY_BINS;
+    if (this->history_count_ < HISTORY_BINS)
+      this->history_count_++;
+    this->bin_sum_ = 0.0;
+    this->bin_n_ = 0;
+    this->bin_start_ += BIN_MS;
+    closed = true;
+  }
+  if (now - this->bin_start_ >= BIN_MS)
+    this->bin_start_ = now;  // device was stalled for > 24 h: restart binning
+  if (std::isfinite(pressure_pa)) {
+    this->bin_sum_ += pressure_pa;
+    this->bin_n_++;
+  }
+  if (closed)
+    this->publish_trends_();
+}
+
+void GY39Component::publish_trends_() {
+  const float now_pa = this->history_ago_(0);
+  const float d3 = (now_pa - this->history_ago_(18)) / 100.0f;    // 18 bins = 3 h
+  const float d24 = (now_pa - this->history_ago_(144)) / 100.0f;  // 144 bins = 24 h
+  ESP_LOGD(TAG, "Pressure trend: 3h %.2f hPa, 24h %.2f hPa (%u bins)", d3, d24, this->history_count_);
+  if (this->pressure_trend_3h_sensor_ != nullptr)
+    this->pressure_trend_3h_sensor_->publish_state(d3);
+  if (this->pressure_trend_24h_sensor_ != nullptr)
+    this->pressure_trend_24h_sensor_->publish_state(d24);
+  if (this->pressure_tendency_text_sensor_ != nullptr) {
+    static const char *const EN[] = {"Falling very rapidly", "Falling quickly", "Falling", "Falling slowly",
+                                     "Steady", "Rising slowly", "Rising", "Rising quickly", "Rising very rapidly"};
+    static const char *const ZH[] = {"非常快速下降", "快速下降", "下降", "緩慢下降", "平穩",
+                                     "緩慢上升",     "上升",     "快速上升", "非常快速上升"};
+    std::string text;
+    if (std::isnan(d3)) {
+      text = this->tendency_zh_ ? "資料收集中" : "Collecting data";
+    } else {
+      int idx = tendency_class(d3) + 4;
+      text = this->tendency_zh_ ? ZH[idx] : EN[idx];
+    }
+    if (!this->pressure_tendency_text_sensor_->has_state() || this->pressure_tendency_text_sensor_->state != text)
+      this->pressure_tendency_text_sensor_->publish_state(text);
+  }
+}
+
 void GY39Component::publish_lux_(uint32_t raw) {
   float lux = raw / 100.0f;
   ESP_LOGD(TAG, "Illuminance: %.2f lx", lux);
@@ -151,21 +286,23 @@ void GY39Component::publish_lux_(uint32_t raw) {
 }
 
 void GY39Component::publish_bme_(int16_t temp, uint32_t pressure, uint16_t humidity, int16_t altitude) {
-  float t = temp / 100.0f;
-  float p = pressure / 10000.0f;  // Pa*100 -> hPa
-  float h = humidity / 100.0f;
-  ESP_LOGD(TAG, "Temperature: %.2f°C, Pressure: %.2f hPa, Humidity: %.2f%%, Altitude: %d m", t, p, h, altitude);
+  const double p_pa = pressure / 100.0 + this->pressure_offset_ * 100.0;  // raw is Pa*100
+  double t_c, rh;
+  apply_calibration(temp / 100.0, humidity / 100.0, p_pa, this->temperature_offset_, this->humidity_gain_,
+                    this->humidity_offset_, &t_c, &rh);
+  ESP_LOGD(TAG, "Raw: %.2f°C %.2f%% %.2f hPa -> calibrated: %.2f°C %.2f%% %.2f hPa, altitude %d m", temp / 100.0,
+           humidity / 100.0, pressure / 10000.0, t_c, rh, p_pa / 100.0, altitude);
   if (this->temperature_sensor_ != nullptr)
-    this->temperature_sensor_->publish_state(t);
+    this->temperature_sensor_->publish_state(t_c);
   if (this->pressure_sensor_ != nullptr)
-    this->pressure_sensor_->publish_state(p);
+    this->pressure_sensor_->publish_state(p_pa / 100.0);
   if (this->humidity_sensor_ != nullptr)
-    this->humidity_sensor_->publish_state(h);
+    this->humidity_sensor_->publish_state(rh);
   if (this->altitude_sensor_ != nullptr)
     this->altitude_sensor_->publish_state(altitude);
 
   if (this->absolute_humidity_sensor_ != nullptr) {
-    double ah = compute_absolute_humidity(temp / 100.0, humidity / 100.0, pressure / 100.0);
+    double ah = compute_absolute_humidity(t_c, rh, p_pa);
     if (std::isnan(ah)) {
       ESP_LOGW(TAG, "Inputs out of range, absolute humidity not calculated");
       this->absolute_humidity_sensor_->publish_state(NAN);
@@ -176,13 +313,30 @@ void GY39Component::publish_bme_(int16_t temp, uint32_t pressure, uint16_t humid
   }
 
   if (this->dew_point_sensor_ != nullptr) {
-    double td = compute_dew_point(temp / 100.0, humidity / 100.0, pressure / 100.0);
+    double td = compute_dew_point(t_c, rh, p_pa);
     if (std::isnan(td)) {
       ESP_LOGW(TAG, "Inputs out of range, dew point not calculated");
     } else {
       ESP_LOGD(TAG, "Dew point: %.3f°C", td);
     }
     this->dew_point_sensor_->publish_state(static_cast<float>(td));
+  }
+
+  if (this->mixing_ratio_sensor_ != nullptr) {
+    double w = compute_mixing_ratio(t_c, rh, p_pa);
+    ESP_LOGD(TAG, "Mixing ratio: %.3f g/kg", w);
+    this->mixing_ratio_sensor_->publish_state(static_cast<float>(w));
+  }
+
+  if (this->sea_level_pressure_sensor_ != nullptr) {
+    double p0 = compute_sea_level_pressure(t_c, rh, p_pa, this->station_altitude_);
+    ESP_LOGD(TAG, "Sea level pressure: %.2f hPa", p0 / 100.0);
+    this->sea_level_pressure_sensor_->publish_state(static_cast<float>(p0 / 100.0));
+  }
+
+  if (this->pressure_trend_3h_sensor_ != nullptr || this->pressure_trend_24h_sensor_ != nullptr ||
+      this->pressure_tendency_text_sensor_ != nullptr) {
+    this->update_pressure_history_((p_pa >= 30000.0 && p_pa <= 110000.0) ? p_pa : NAN);
   }
 }
 
@@ -210,7 +364,10 @@ void GY39UARTComponent::update() {
   this->want_lux_ = this->illuminance_sensor_ != nullptr;
   this->want_bme_ = this->temperature_sensor_ != nullptr || this->pressure_sensor_ != nullptr ||
                     this->humidity_sensor_ != nullptr || this->altitude_sensor_ != nullptr ||
-                    this->absolute_humidity_sensor_ != nullptr || this->dew_point_sensor_ != nullptr;
+                    this->absolute_humidity_sensor_ != nullptr || this->dew_point_sensor_ != nullptr ||
+                    this->mixing_ratio_sensor_ != nullptr || this->sea_level_pressure_sensor_ != nullptr ||
+                    this->pressure_trend_3h_sensor_ != nullptr || this->pressure_trend_24h_sensor_ != nullptr ||
+                    this->pressure_tendency_text_sensor_ != nullptr;
   this->last_request_ = millis();
   this->send_command_(CMD_QUERY_ALL);
 }

@@ -21,18 +21,33 @@ sensor:
   - platform: gy39
     interface: i2c
     address: 0x5B
-    update_interval: 10s
+    update_interval: 60s
+    station_altitude: 35       # sensor height above mean sea level (m): ground elevation + mounting height
+    # Calibration (see README). Applied before every calculated value.
+    # temperature_offset: -0.8
+    # humidity_calibration:
+    #   - 34.0 -> 32.8         # MgCl2 salt test
+    #   - 77.5 -> 75.3         # NaCl salt test
+    # pressure_offset: 0.0
     illuminance:
       name: "GY39 Illuminance"
     temperature:
       name: "GY39 Temperature"
-    pressure:
-      name: "GY39 Pressure"
     humidity:
       name: "GY39 Humidity"
-    altitude:
-      name: "GY39 Altitude"
-    absolute_humidity:
-      name: "GY39 Absolute Humidity"
+    pressure:
+      name: "GY39 Pressure"
     dew_point:
       name: "GY39 Dew Point"
+    absolute_humidity:
+      name: "GY39 Absolute Humidity"
+    mixing_ratio:
+      name: "GY39 Mixing Ratio"
+    sea_level_pressure:
+      name: "GY39 Sea Level Pressure"
+    pressure_trend_3h:
+      name: "GY39 Pressure Trend 3h"
+    pressure_trend_24h:
+      name: "GY39 Pressure Trend 24h"
+    pressure_tendency:
+      name: "GY39 Pressure Tendency"

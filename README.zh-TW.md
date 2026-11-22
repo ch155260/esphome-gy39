@@ -6,31 +6,53 @@
 GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上板上 MCU 組成。
 本元件同時支援 **UART** 與 **I2C** 兩種介面。
 
+**模組直接量測**
+
 | 感測項目      | 單位 | 說明                          |
 |---------------|------|-------------------------------|
 | `illuminance` | lx   | 照度（0.045 – 188,000 lx）    |
 | `temperature` | °C   | 溫度                          |
-| `pressure`    | hPa  | 氣壓                          |
 | `humidity`    | %    | 相對濕度                      |
-| `altitude`    | m    | 模組依氣壓推算的海拔          |
-| `absolute_humidity` | g/m³ | 絕對濕度（水氣密度），由溫度、相對濕度、氣壓**計算**而得（[說明](#絕對濕度與露點)） |
-| `dew_point`   | °C   | 露點，用同一組數據**計算**而得（[說明](#絕對濕度與露點)） |
+| `pressure`    | hPa  | 氣壓（測站氣壓）              |
+| `altitude`    | m    | 模組推算的海拔，只有整數公尺。*不建議使用*，原因見[數值參考價值](#數值參考價值) |
+
+**本元件計算**（說明見[計算值](#計算值)）
+
+| 感測項目             | 單位 | 說明 |
+|----------------------|------|------|
+| `dew_point`          | °C   | 露點（WMO 定義，以液態水為基準） |
+| `absolute_humidity`  | g/m³ | 絕對濕度（水氣密度） |
+| `mixing_ratio`       | g/kg | 混合比：每公斤乾空氣含有的水氣質量 |
+| `sea_level_pressure` | hPa  | 換算到海平面的氣壓（需要設定 `station_altitude`） |
+| `pressure_trend_3h`  | hPa  | 過去 3 小時的氣壓變化（WMO 標準） |
+| `pressure_trend_24h` | hPa  | 過去 24 小時的氣壓變化（可以消除每日的氣壓起伏） |
+| `pressure_tendency`  | 文字 | 氣壓趨勢的文字描述，例如「緩慢下降」（text sensor） |
 
 每一項都可以選擇要不要啟用，也都支援 ESPHome 一般 [Sensor](https://esphome.io/components/sensor/) 的設定（`name`、`id`、`filters` 等）。
+計算值只有在設定檔中啟用時才會計算。
+
+> **實體名稱要包含英文或數字**：較新版的 ESPHome 會把實體名稱轉成 ASCII 的 ID，中文字會全部變成 `_`。
+> 如果名稱只有中文，例如 `溫度` 和 `濕度`，兩個都會變成同一個 ID `__`，設定驗證就會失敗。
+> 所以本文件的範例都用「中文 + 英文」的名稱，例如 `溫度 Temperature`。
+> 你也可以用英文命名，之後再到 Home Assistant 裡改成中文顯示名稱。
 
 ---
 
 ## 目錄
 
 - [安裝](#安裝)
+- [建議設定](#建議設定)
 - [UART 與 I2C 怎麼選](#uart-與-i2c-怎麼選)
 - [接線](#接線)
 - [UART 使用範例](#uart-使用範例)
 - [I2C 使用範例](#i2c-使用範例)
 - [設定選項](#設定選項)
 - [使用建議](#使用建議)
+- [安裝位置](#安裝位置)
+- [校正](#校正)
 - [疑難排解](#疑難排解)
-- [絕對濕度與露點](#絕對濕度與露點)
+- [計算值](#計算值)
+  - [數值參考價值](#數值參考價值)
 - [通訊協定說明](#通訊協定說明)
 
 ---
@@ -44,6 +66,54 @@ external_components:
 ```
 
 想固定在某個版本的話，把 `@main` 換成 tag 或 commit hash。
+
+---
+
+## 建議設定
+
+這組設定只包含參考價值高的數值（原因見[數值參考價值](#數值參考價值)）。
+`uart:` 或 `i2c:` 匯流排的設定請參考後面的範例。
+
+```yaml
+sensor:
+  - platform: gy39
+    interface: uart            # 或 i2c
+    uart_id: gy39_uart
+    update_interval: 60s
+    station_altitude: 35       # 感測器的海拔（m）= 地面海拔 + 安裝高度
+    tendency_language: zh-TW   # 趨勢文字用中文
+    # 校正，請參考「校正」一節。會在所有計算之前套用。
+    # temperature_offset: -0.8
+    # humidity_calibration:
+    #   - 34.0 -> 32.8
+    #   - 77.5 -> 75.3
+
+    # 直接量測
+    temperature:
+      name: "溫度 Temperature"
+    humidity:
+      name: "濕度 Humidity"
+    pressure:
+      name: "氣壓 Pressure"
+    illuminance:
+      name: "照度 Illuminance"
+
+    # 計算值（不受自熱影響，參考價值高）
+    dew_point:
+      name: "露點 Dew Point"
+    absolute_humidity:
+      name: "絕對濕度 Absolute Humidity"
+    mixing_ratio:
+      name: "混合比 Mixing Ratio"
+    sea_level_pressure:
+      name: "海平面氣壓 Sea Level Pressure"
+    pressure_trend_3h:
+      name: "3小時氣壓變化 Pressure Trend 3h"
+    pressure_trend_24h:
+      name: "24小時氣壓變化 Pressure Trend 24h"
+    pressure_tendency:
+      name: "氣壓趨勢 Pressure Tendency"
+```
 
 ---
 
@@ -116,21 +186,22 @@ sensor:
   - platform: gy39
     interface: uart        # 預設值，可以省略
     uart_id: gy39_uart
-    update_interval: 10s
+    update_interval: 60s
+    station_altitude: 35   # 感測器的海拔（m），sea_level_pressure 必填
     illuminance:
-      name: "GY39 照度"
+      name: "GY39 照度 Illuminance"
     temperature:
-      name: "GY39 溫度"
+      name: "GY39 溫度 Temperature"
     pressure:
-      name: "GY39 氣壓"
+      name: "GY39 氣壓 Pressure"
     humidity:
-      name: "GY39 濕度"
-    altitude:
-      name: "GY39 海拔"
+      name: "GY39 濕度 Humidity"
+    sea_level_pressure:
+      name: "GY39 海平面氣壓 Sea Level Pressure"
     absolute_humidity:
-      name: "GY39 絕對濕度"
+      name: "GY39 絕對濕度 Absolute Humidity"
     dew_point:
-      name: "GY39 露點"
+      name: "GY39 露點 Dew Point"
 ```
 
 ### ESP8266
@@ -193,21 +264,22 @@ sensor:
   - platform: gy39
     interface: i2c
     address: 0x5B   # 預設值，可以省略
-    update_interval: 10s
+    update_interval: 60s
+    station_altitude: 35   # 感測器的海拔（m），sea_level_pressure 必填
     illuminance:
-      name: "GY39 照度"
+      name: "GY39 照度 Illuminance"
     temperature:
-      name: "GY39 溫度"
+      name: "GY39 溫度 Temperature"
     pressure:
-      name: "GY39 氣壓"
+      name: "GY39 氣壓 Pressure"
     humidity:
-      name: "GY39 濕度"
-    altitude:
-      name: "GY39 海拔"
+      name: "GY39 濕度 Humidity"
+    sea_level_pressure:
+      name: "GY39 海平面氣壓 Sea Level Pressure"
     absolute_humidity:
-      name: "GY39 絕對濕度"
+      name: "GY39 絕對濕度 Absolute Humidity"
     dew_point:
-      name: "GY39 露點"
+      name: "GY39 露點 Dew Point"
 ```
 
 ESP32 可以用任意兩支 GPIO，例如 `sda: GPIO21`、`scl: GPIO22`，頻率一樣設 `frequency: 50kHz`。
@@ -230,9 +302,19 @@ ESP32 可以用任意兩支 GPIO，例如 `sda: GPIO21`、`scl: GPIO22`，頻率
 | `temperature`     | 全部 | 否   | –       | 溫度（°C） |
 | `pressure`        | 全部 | 否   | –       | 氣壓（hPa） |
 | `humidity`        | 全部 | 否   | –       | 濕度（%） |
-| `altitude`        | 全部 | 否   | –       | 海拔（m） |
-| `absolute_humidity` | 全部 | 否 | –       | 絕對濕度（g/m³），計算值 |
+| `altitude`        | 全部 | 否   | –       | 海拔（m），由模組提供 |
 | `dew_point`       | 全部 | 否   | –       | 露點（°C），計算值 |
+| `absolute_humidity` | 全部 | 否 | –       | 絕對濕度（g/m³），計算值 |
+| `mixing_ratio`    | 全部 | 否   | –       | 混合比（g/kg），計算值 |
+| `sea_level_pressure` | 全部 | 否 | –      | 海平面氣壓（hPa），計算值，需要 `station_altitude` |
+| `station_altitude` | 全部 | 有 `sea_level_pressure` 時必填 | – | **感測器本身**的海拔，單位 m（−500 … 9000） |
+| `pressure_trend_3h` | 全部 | 否 | –       | 3 小時氣壓變化（hPa） |
+| `pressure_trend_24h` | 全部 | 否 | –      | 24 小時氣壓變化（hPa） |
+| `pressure_tendency` | 全部 | 否 | –       | 氣壓趨勢文字（text sensor） |
+| `tendency_language` | 全部 | 否 | `en`    | `pressure_tendency` 的語言：`en` 或 `zh-TW` |
+| `temperature_offset` | 全部 | 否 | `0`    | 溫度修正量（°C），RH 會跟著重新計算，見[校正](#校正) |
+| `humidity_calibration` | 全部 | 否 | –    | 1 或 2 個校正點，格式為 `量測值 -> 真值`（%RH） |
+| `pressure_offset` | 全部 | 否   | `0`     | 氣壓修正量（hPa） |
 
 ---
 
@@ -247,27 +329,92 @@ ESP32 可以用任意兩支 GPIO，例如 `sda: GPIO21`、`scl: GPIO22`，頻率
 - **供電**：板子上有穩壓 IC，3.3 V 和 5 V 都能用。
   訊號電位會跟著 VCC 走，所以**接 ESP 的時候建議用 3.3 V 供電**，讓訊號維持在 3.3 V。
 - **溫度準確度**：BME280 會被附近的電路加熱而偏高。
-  模組要裝在離 ESP 和穩壓 IC 遠一點的地方，或者用濾波器修正：
-
-  ```yaml
-  temperature:
-    name: "GY39 溫度"
-    filters:
-      - offset: -1.5
-  ```
+  模組要裝在離 ESP 和穩壓 IC 遠一點的地方（見[安裝位置](#安裝位置)），剩下的偏差再用 `temperature_offset` 修正（見[校正](#校正)）。
+  **不要**為了這個在溫度感測器上加 `filters: - offset:`：濾波器只會改變發布出去的溫度，不會影響各項計算值。
 
 - **照度數值跳動時可以做平滑處理**：
 
   ```yaml
   illuminance:
-    name: "GY39 照度"
+    name: "GY39 照度 Illuminance"
     filters:
       - sliding_window_moving_average:
           window_size: 5
           send_every: 1
   ```
 
-- **海拔**是模組用標準海平面氣壓推算的，只能當作粗略參考，用不到的話可以不要啟用。
+- **海拔**是模組用固定的 1013.25 hPa 當基準推算的，只有整數公尺，而且會跟著天氣飄動 80–250 m。
+  建議改用 `sea_level_pressure` 和氣壓趨勢。
+
+---
+
+## 安裝位置
+
+模組裝在哪裡，對讀數的影響比任何公式都大。一般原則如下：
+
+| 因素 | 影響 | 建議做法 |
+|---|---|---|
+| **陽光直射** | 感測器會升溫好幾 °C，溫度偏高、RH 偏低 | 裝在**防輻射罩**裡：白色、百葉式、通風的外殼（類似氣象站的百葉箱） |
+| **雨水、噴濺** | 感測器受潮，RH 卡在 100 %，還會腐蝕 | 裝在屋簷下，感測器開口**朝下**。不要完全密封；用 PTFE 透氣膜可以 |
+| **熱源** | 自熱或局部熱空氣 | 和 ESP、穩壓 IC 距離 ≥ 5 cm（用線把模組拉出來）。遠離熱水器、烘衣機、燈具 |
+| **緊貼天花板** | 熱空氣會往上累積（溫度分層），被曬熱的樓板還會輻射熱 | 從天花板往下吊 **20–30 cm**，不要貼著天花板 |
+| **長時間 RH > 90 % 或結露** | BME280 之後幾個小時可能讀值偏高，長期會漂移 | 用通風的外殼，遠離蒸氣來源 |
+| **照度感測器的方向** | MAX44009 在板子正面，朝下時量到的是反射光 | 把 `illuminance` 當**相對**亮度指標使用，或另外裝一顆朝向天空的模組 |
+| **線長** | 線太長時 I2C 會失效 | UART 9600 baud 拉好幾公尺都沒問題；I2C 建議控制在 30–50 cm 以內 |
+
+只取決於**空氣含水量**的數值（露點、混合比），以及以氣壓為基礎的數值，幾乎不受感測器發熱影響，詳見[數值參考價值](#數值參考價值)。
+
+**`station_altitude`** 指的是**感測器**的海拔，不是地面的海拔：要用地面海拔加上樓層高度。
+例如地面海拔 20 m，住 4 樓（每層約 3 m，地板高 9 m），再加上天花板下方 2.5 m 的安裝高度，大約是 31 m。
+這個值每差 1 m，海平面氣壓只差約 0.12 hPa。
+
+---
+
+## 校正
+
+ESPHome 在 `temperature`、`humidity` 上設定的 `filters`，只會改變發布出去的數值。
+計算值（露點、絕對濕度等）用的是原始讀數，不會被這些濾波器校正到。
+所以本元件內建了校正選項，會在**所有計算之前**套用：
+
+```yaml
+    temperature_offset: -0.8      # °C
+    humidity_calibration:         # '量測值 -> 真值'；1 點 = 只修正偏移，2 點 = 線性校正
+      - 34.0 -> 32.8
+      - 77.5 -> 75.3
+    pressure_offset: 0.0          # hPa
+```
+
+**處理順序（符合物理原理）：**
+
+1. 先對原始 RH 套用 `humidity_calibration`。這時的 RH 是在感測器自己的溫度下量到的。
+2. 用原始溫度和校正後的 RH 算出水氣壓 *e*。
+3. 套用 `temperature_offset`。
+4. **在 *e* 不變的前提下，用修正後的溫度重新計算 RH**。感測器發熱，並不會改變空氣中的含水量。
+
+所以用 `temperature_offset` 修正自熱時，RH 也會一起被正確修正，而露點和混合比維持不變。
+例如：空氣實際是 25 °C、60 %，感測器被加熱到 27 °C，讀到 53.3 %。
+設定 `temperature_offset: -2` 之後，元件會發布 25.00 °C、60.00 %。
+
+**濕度：飽和鹽水測試（便宜又可靠）**
+
+1. 在小杯子裡放幾匙鹽，只加一點水攪成濕濕的泥狀。杯底一定要留著沒溶解的鹽。
+2. 把杯子和模組（ESP 不要放進去）一起放進密封盒，擺在室溫穩定、照不到陽光的地方。
+3. 等 6–12 小時，記下 RH 讀數。
+4. 換另一種鹽再做一次，就可以做兩點校正。
+
+| 鹽類 | 25 °C 時的平衡濕度（Greenspan 1977） |
+|---|---|
+| 氯化鈉 NaCl（食鹽） | **75.3 %** |
+| 氯化鎂 MgCl₂ | **32.8 %** |
+
+然後設定，例如 `humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]`。
+這個測試要在設定 `temperature_offset` **之前**做，做的時候 `temperature_offset` 要保持 0。
+
+**溫度：** 在模組旁邊放一支可信的溫度計（放在陰涼、有空氣流動的地方），
+比對幾個小時，把 `temperature_offset` 設成平均差值。
+
+**氣壓：** 連續幾天拿 `sea_level_pressure` 和附近氣象站的官方數值比對（挑天氣變化不大的時段），
+把 `pressure_offset` 設成平均差值。氣壓趨勢不需要這個校正，因為固定的偏差在相減時會抵消。
 
 ---
 
@@ -293,9 +440,11 @@ logger:
 
 ---
 
-## 絕對濕度與露點
+## 計算值
 
-這兩個值都是在 ESP 上，用模組自己量到的溫度、相對濕度和氣壓計算出來的，用的是同一套參考等級公式。
+所有計算值都在 ESP 上用倍精度（double）計算，輸入是同一次讀取中（校正後的）溫度、相對濕度和氣壓。
+只要有參考等級的公式，就不用近似式。
+每一條公式都在主機上和另一個獨立的實作比對過。
 
 ### 絕對濕度
 
@@ -372,6 +521,106 @@ $$f(p,T_d)\cdot e_w(T_d) = e$$
 | 35 °C、30 % RH | 14.85 °C |
 | 0 °C、50 % RH | −9.18 °C |
 | −10 °C、80 % RH | −12.79 °C |
+
+---
+
+### 混合比
+
+$$w = \varepsilon\,\frac{e}{p-e}, \qquad \varepsilon = M_w/M_a = 0.621945$$
+
+係數取自 ASHRAE Fundamentals，*e* 的算法和絕對濕度完全相同，單位是每公斤乾空氣含多少克水氣（g/kg）。
+絕對濕度會隨空氣加熱、冷卻或壓縮而改變，混合比不會，所以拿來比較室內外或不同房間的空氣最公平。
+例如：25 °C、60 % RH、1013.25 hPa → **11.95 g/kg**。
+準確度約 ±8 %（來自 ±3 % RH 和 ±1 °C），而且**不受自熱影響**。
+
+### 海平面氣壓
+
+採用德國氣象局（DWD）的海平面氣壓換算公式：
+
+$$p_0 = p\cdot\exp\!\left(\frac{g\,h}{R_d\,T_h}\right),\qquad T_h = T + C_h\,E + \frac{a\,h}{2}$$
+
+| 符號 | 數值 |
+|---|---|
+| $g$ | 9.80665 m/s² |
+| $R_d$ | 287.05 J/(kg·K) |
+| $a$ | 0.0065 K/m（平均氣溫垂直遞減率） |
+| $C_h$ | 0.12 K/hPa（濕度修正） |
+| $E$ | 水氣壓（hPa，精確計算） |
+| $h$ | `station_altitude` |
+
+和一般的簡易氣壓公式相比，這條公式多了濕度修正；在 120 m 時兩者差 0.13 hPa。
+準確度是 ±1 hPa（BME280 的絕對精度），另外 `station_altitude` 每差 1 m 會再多 0.12 hPa。
+如果用官方氣象站的數值定出 `pressure_offset`，結果可以和氣象單位的數值對到零點幾 hPa。
+
+### 氣壓趨勢
+
+元件會把測站氣壓整理成 **10 分鐘平均值**，在記憶體中保留 24 小時
+（145 筆，約 0.6 kB RAM）。每 10 分鐘發布一次以下數值：
+
+- `pressure_trend_3h`：最新的 10 分鐘平均值，減去 3 小時前的那一筆。開機後**約 3 小時 10 分**開始有數值。
+- `pressure_trend_24h`：同樣的方式，但比較 24 小時前。開機後**約 24 小時 10 分**開始有數值。
+- `pressure_tendency`：3 小時變化的文字描述，採用英國氣象局（UK Met Office）／WMO 的分級用語。
+
+| 3 小時變化（hPa） | `en` | `zh-TW` |
+|---|---|---|
+| < 0.1 | Steady | 平穩 |
+| 0.1 – 1.5 | Rising / Falling slowly | 緩慢上升／下降 |
+| 1.6 – 3.5 | Rising / Falling | 上升／下降 |
+| 3.6 – 6.0 | Rising / Falling quickly | 快速上升／下降 |
+| > 6.0 | Rising / Falling very rapidly | 非常快速上升／下降 |
+
+紀錄還不夠時，趨勢值會是 `NaN`，文字顯示「資料收集中」。紀錄只存在 RAM 裡，所以重開機後會重新累積。
+某個 10 分鐘區間如果完全沒有讀數（例如 Wi-Fi 斷線，或 `update_interval` 設得比 10 分鐘還長），
+會記成 `NaN`，不會用內插去補。
+
+準確度：趨勢是兩個值相減，絕對誤差會互相抵消，剩下的是 BME280 **±0.12 hPa 的相對精度**。
+所以氣壓趨勢是這個模組最準確的輸出。
+
+**每日氣壓起伏（熱帶和副熱帶很重要，台灣也包含在內）：**
+就算天氣完全穩定，氣壓每天也會起伏兩次，幅度約 ±1 hPa（半日潮）。
+地方時大約 10:00、22:00 最高，04:00、16:00 最低。
+所以 3 小時內有 1–2 hPa 的變化，可能完全正常。
+**24 小時趨勢**比較的是每天同一個時刻，可以消掉這個起伏。
+實用的天氣警示門檻：
+
+- 3 小時下降超過 3 hPa，或 24 小時下降超過 5 hPa → 有天氣系統正在接近
+- 3 小時下降超過 6 hPa → 強烈天氣系統（例如颱風）
+
+氣壓趨勢只是一個指標，不能取代天氣預報；例如午後雷陣雨常常沒有明顯的氣壓前兆。
+裝好之後不要再移動感測器：高度每差 10 m，氣壓大約差 1.2 hPa。
+
+### 數值參考價值
+
+公式本身帶來的誤差可以忽略。真正重要的是：BME280 的誤差
+（±1 °C、±3 % RH、絕對 ±1 hPa、相對 ±0.12 hPa）傳遞到各數值後有多大，
+以及數值會不會受到感測器**自熱**（被 ESP、陽光或熱天花板加熱）影響。
+
+下表是 25 °C、60 % RH、1013 hPa 時的誤差傳遞結果，以及感測器自熱 +2 K 時造成的誤差：
+
+| 數值 | 不確定度（依規格） | 自熱 +2 K 造成的誤差 | 參考價值 |
+|---|---|---|---|
+| `pressure_trend_3h` / `_24h` | ±0.12 hPa（相對） | 無 | 🟢 高 |
+| `pressure`、`sea_level_pressure` | ±1 hPa | 無 | 🟢 高 |
+| `dew_point` | ±1.2 K | **0** | 🟢 高 |
+| `mixing_ratio` | ±8 % | **0** | 🟢 高 |
+| `absolute_humidity` | ±7.5 % | −0.7 % | 🟢 高 |
+| `temperature` | ±1 °C | **+2 K** | 🟠 要安裝得當並校正後才可靠 |
+| `humidity`（RH） | ±3 % RH | **−6.7 % RH** | 🟠 要安裝得當並校正後才可靠 |
+| `altitude`（模組提供） | ±8 m，會隨天氣飄動 80–250 m | 無 | 🔴 低 |
+
+為什麼露點和混合比不受自熱影響？BME280 的溫度和濕度是在同一顆晶片上量的。
+晶片比空氣熱的時候，溫度會讀高、RH 會相對讀低，但用兩者算出的水氣壓 *e* 不變；
+只取決於 *e* 的數值，就都還是正確的。
+
+刻意不提供的數值：
+
+- **VPD**：自熱 2 K 就會偏 +31 %，高濕時誤差也有 ±31 %。
+- **熱指數**：經驗公式，會把 1 °C 的誤差放大成 3 °C 以上。
+- **濕球溫度、焓值、Humidex**：都會受自熱影響。
+- **照度換算 PPFD**：需要知道光源的光譜。
+
+上表的不確定度假設各項誤差互相獨立，而且只適用於 BME280 的 20–80 % RH 範圍。
+這些都是理論推算，沒有用標準儀器實際驗證過。
 
 ---
 
