@@ -68,7 +68,7 @@ To pin a specific version, replace `@main` with a tag or commit hash.
 
 ## Package (quickest setup)
 
-Instead of writing the bus, `external_components` and every sensor yourself, you can import a
+Instead of writing `external_components` and every sensor yourself, you can import a
 ready-made [package](https://esphome.io/components/packages/) from this repository:
 
 ```yaml
@@ -85,52 +85,65 @@ packages:
           gy39_rx_pin: GPIO16
 ```
 
-The package adds the `uart:` / `i2c:` bus, the external component and the
-[recommended sensors](#recommended-configuration). Full example: [`examples/gy39-package.yaml`](examples/gy39-package.yaml).
+| Package | Bus |
+|---|---|
+| `packages/gy39-uart.yaml` | Creates its own UART bus `${gy39_id}_uart` |
+| `packages/gy39-i2c.yaml` | Uses the `i2c:` bus **from your main config** (define it there, `frequency: 50kHz` recommended) |
 
-**Variables** (pass them under `vars:`, or as top-level `substitutions:` in your config):
+Both add the external component and the [recommended sensors](#recommended-configuration).
+Full example: [`examples/gy39-package.yaml`](examples/gy39-package.yaml).
+
+**Variables.** Set them under `vars:`. The package's own `defaults:` take precedence over top-level `substitutions:`,
+so a top-level substitution only works for `gy39_station_altitude`, which has no default.
 
 | Variable | Package | Default | Description |
 |---|---|---|---|
 | `gy39_station_altitude` | both | **required** | Sensor height above sea level (m) |
-| `gy39_name` | both | `GY39` | Entity name prefix (use ASCII, see the note below) |
+| `gy39_id` | both | `gy39` | Prefix of every ID (`gy39_sensor`, `gy39_temperature`, …). Use different values for several modules |
+| `gy39_name_prefix` | both | `""` | Entity name prefix, e.g. `"Balcony "` or `"陽台 "` (note the trailing space). With several modules the prefixes must differ in ASCII letters or digits, because non-ASCII characters become `_` in ESPHome's internal IDs |
 | `gy39_update_interval` | both | `60s` | Polling interval |
 | `gy39_tendency_language` | both | `en` | `en` or `zh-TW` |
+| `gy39_temperature_offset` | both | `0` | °C, see [Calibration](#calibration) |
+| `gy39_pressure_offset` | both | `0` | hPa |
+| `gy39_failure_timeout` | both | `60s` | See `failure_timeout` in [Configuration variables](#configuration-variables) |
 | `gy39_ref` | both | `main` | Git ref of the component. Set it to the same value as the package `ref` |
 | `gy39_tx_pin` / `gy39_rx_pin` | UART | `GPIO17` / `GPIO16` | ESP TX → GY-39 DR, ESP RX ← GY-39 CT |
 | `gy39_baud_rate` | UART | `9600` | UART baud rate |
-| `gy39_sda_pin` / `gy39_scl_pin` | I2C | `GPIO4` / `GPIO5` | SDA → DR, SCL → CT |
-| `gy39_i2c_frequency` | I2C | `50kHz` | I2C bus frequency |
+| `gy39_address` | I2C | `0x5B` | I2C address |
 
-**Changing the package.** Every entity has a fixed ID (`gy39_sensor` for the platform entry,
-`gy39_temperature`, `gy39_dew_point`, `gy39_uart`, `gy39_i2c`, …). Use `!extend` to change options and `!remove` to drop sensors:
+**Changing the package.** The platform entry has the ID `${gy39_id}_sensor` (not just `gy39`, because that name
+is reserved for the integration). Use `!extend` to change options and `!remove` to drop sensors:
 
 ```yaml
 sensor:
   - id: !extend gy39_sensor
-    temperature_offset: -0.8
     humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
     illuminance: !remove
     mixing_ratio: !remove
 ```
 
-**Already have an I2C bus?** Don't define another bus with the id `gy39_i2c`. ESPHome reports it as "redefined". Use one of these instead:
+**Several I2C buses or several modules.** Choose the bus with `i2c_id`. Each module needs its own `gy39_id`:
 
 ```yaml
-# a) use the package's bus and adjust it
 i2c:
-  - id: !extend gy39_i2c
-    scan: true
-
-# b) keep your own bus and remove the package's
-i2c:
-  - id: !remove gy39_i2c
-  - id: my_bus
-    sda: GPIO4
-    scl: GPIO5
+  - {id: bus_a, sda: GPIO21, scl: GPIO22, frequency: 50kHz}
+  - {id: bus_b, sda: GPIO18, scl: GPIO19, frequency: 50kHz}
+packages:
+  indoor:
+    url: https://github.com/ch155260/esphome-gy39
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars: {gy39_id: indoor, gy39_name_prefix: "Indoor ", gy39_station_altitude: "31"}
+  outdoor:
+    url: https://github.com/ch155260/esphome-gy39
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars: {gy39_id: outdoor, gy39_name_prefix: "Outdoor ", gy39_station_altitude: "31"}
 sensor:
-  - id: !extend gy39_sensor
-    i2c_id: my_bus
+  - id: !extend indoor_sensor
+    i2c_id: bus_a
+  - id: !extend outdoor_sensor
+    i2c_id: bus_b
 ```
 
 On ESP8266 with the UART package on GPIO1/GPIO3, also set `logger: baud_rate: 0`.
@@ -384,6 +397,7 @@ For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with 
 | `temperature_offset` | all | no     | `0`     | °C added to the temperature. RH is re-evaluated, see [Calibration](#calibration) |
 | `humidity_calibration` | all | no   | –       | 1 or 2 points `measured -> true` (%RH) |
 | `pressure_offset` | all  | no       | `0`     | hPa added to the pressure |
+| `failure_timeout` | all  | no       | `60s`   | When no good reading arrives for this long, all live and calculated values are published as unknown (NaN) once, and the tendency text shows "No data". `0s` = immediately |
 
 ---
 

@@ -72,7 +72,7 @@ external_components:
 
 ## 以 Package 匯入
 
-不想自己寫匯流排、`external_components` 和每一個感測器的話，可以直接匯入本 repo 準備好的
+不想自己寫 `external_components` 和每一個感測器的話，可以直接匯入本 repo 準備好的
 [package](https://esphome.io/components/packages/)：
 
 ```yaml
@@ -90,52 +90,65 @@ packages:
           gy39_tendency_language: zh-TW
 ```
 
-這個 package 會幫你加上 `uart:` 或 `i2c:` 匯流排、外部元件，以及[建議設定](#建議設定)裡的所有感測器。
+| Package | 匯流排 |
+|---|---|
+| `packages/gy39-uart.yaml` | 自己建立 UART 匯流排 `${gy39_id}_uart` |
+| `packages/gy39-i2c.yaml` | 使用**主設定檔**裡的 `i2c:` 匯流排（請在主設定檔定義，建議 `frequency: 50kHz`） |
+
+兩種 package 都會加上外部元件，以及[建議設定](#建議設定)裡的所有感測器。
 完整範例見 [`examples/gy39-package.yaml`](examples/gy39-package.yaml)。
 
-**變數**（寫在 `vars:` 底下，或寫在自己設定檔最上層的 `substitutions:`）：
+**變數**請寫在 `vars:` 底下。注意：package 內建的 `defaults:` 優先權比主設定檔最上層的 `substitutions:` 高，
+所以用 `substitutions:` 只能設定沒有預設值的 `gy39_station_altitude`，其他變數一定要用 `vars:`。
 
 | 變數 | 適用 | 預設值 | 說明 |
 |---|---|---|---|
 | `gy39_station_altitude` | 兩者 | **必填** | 感測器的海拔（m） |
-| `gy39_name` | 兩者 | `GY39` | 實體名稱的前綴（請用英文或數字，原因見下方說明） |
+| `gy39_id` | 兩者 | `gy39` | 所有 ID 的前綴（`gy39_sensor`、`gy39_temperature` 等）。接多顆模組時，每顆要用不同的值 |
+| `gy39_name_prefix` | 兩者 | `""` | 實體名稱前綴，例如 `"Balcony "` 或 `"陽台 "`（注意結尾的空格）。接多顆模組時，前綴要有**英文或數字上的差異**（例如 `"室內 Indoor "`、`"陽台 Balcony "`），因為中文字在 ESPHome 內部的 ID 裡都會變成 `_`，只差中文會被判定為重複 |
 | `gy39_update_interval` | 兩者 | `60s` | 更新間隔 |
 | `gy39_tendency_language` | 兩者 | `en` | 趨勢文字的語言：`en` 或 `zh-TW` |
+| `gy39_temperature_offset` | 兩者 | `0` | 溫度修正（°C），見[校正](#校正) |
+| `gy39_pressure_offset` | 兩者 | `0` | 氣壓修正（hPa） |
+| `gy39_failure_timeout` | 兩者 | `60s` | 見[設定選項](#設定選項)中的 `failure_timeout` |
 | `gy39_ref` | 兩者 | `main` | 元件的 git 版本，請設成和 package 的 `ref` 相同 |
 | `gy39_tx_pin` / `gy39_rx_pin` | UART | `GPIO17` / `GPIO16` | ESP TX → GY-39 DR、ESP RX ← GY-39 CT |
 | `gy39_baud_rate` | UART | `9600` | UART 鮑率 |
-| `gy39_sda_pin` / `gy39_scl_pin` | I2C | `GPIO4` / `GPIO5` | SDA → DR、SCL → CT |
-| `gy39_i2c_frequency` | I2C | `50kHz` | I2C 頻率 |
+| `gy39_address` | I2C | `0x5B` | I2C 位址 |
 
-**修改 package 的內容。** 每個實體都有固定的 ID：感測器平台本身是 `gy39_sensor`，其他還有
-`gy39_temperature`、`gy39_dew_point`、`gy39_uart`、`gy39_i2c` 等。用 `!extend` 修改設定，用 `!remove` 拿掉不要的感測器：
+**修改 package 的內容。** 感測器平台本身的 ID 是 `${gy39_id}_sensor`。不能只叫 `gy39`，因為這個名稱被元件本身佔用了。
+用 `!extend` 修改設定，用 `!remove` 拿掉不要的感測器：
 
 ```yaml
 sensor:
   - id: !extend gy39_sensor
-    temperature_offset: -0.8
     humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
     illuminance: !remove
     mixing_ratio: !remove
 ```
 
-**已經有 I2C 匯流排了？** 不要再定義一條 id 也叫 `gy39_i2c` 的匯流排，ESPHome 會報「redefined」錯誤。請改用下面其中一種寫法：
+**多條 I2C 匯流排或多顆模組。** 用 `i2c_id` 指定匯流排，每顆模組要用不同的 `gy39_id`：
 
 ```yaml
-# a) 沿用 package 的匯流排，只調整設定
 i2c:
-  - id: !extend gy39_i2c
-    scan: true
-
-# b) 保留自己的匯流排，移除 package 的那一條
-i2c:
-  - id: !remove gy39_i2c
-  - id: my_bus
-    sda: GPIO4
-    scl: GPIO5
+  - {id: bus_a, sda: GPIO21, scl: GPIO22, frequency: 50kHz}
+  - {id: bus_b, sda: GPIO18, scl: GPIO19, frequency: 50kHz}
+packages:
+  indoor:
+    url: https://github.com/ch155260/esphome-gy39
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars: {gy39_id: indoor, gy39_name_prefix: "室內 Indoor ", gy39_station_altitude: "31"}
+  outdoor:
+    url: https://github.com/ch155260/esphome-gy39
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars: {gy39_id: outdoor, gy39_name_prefix: "陽台 Balcony ", gy39_station_altitude: "31"}
 sensor:
-  - id: !extend gy39_sensor
-    i2c_id: my_bus
+  - id: !extend indoor_sensor
+    i2c_id: bus_a
+  - id: !extend outdoor_sensor
+    i2c_id: bus_b
 ```
 
 ESP8266 如果用 UART package 接在 GPIO1/GPIO3，記得另外設定 `logger: baud_rate: 0`。
@@ -388,6 +401,7 @@ ESP32 可以用任意兩支 GPIO，例如 `sda: GPIO21`、`scl: GPIO22`，頻率
 | `temperature_offset` | 全部 | 否 | `0`    | 溫度修正量（°C），RH 會跟著重新計算，見[校正](#校正) |
 | `humidity_calibration` | 全部 | 否 | –    | 1 或 2 個校正點，格式為 `量測值 -> 真值`（%RH） |
 | `pressure_offset` | 全部 | 否   | `0`     | 氣壓修正量（hPa） |
+| `failure_timeout` | 全部 | 否   | `60s`   | 超過這段時間都沒有成功讀取時，所有即時值和計算值會發布一次「未知」（NaN），趨勢文字顯示「無資料」。設 `0s` 表示立即 |
 
 ---
 

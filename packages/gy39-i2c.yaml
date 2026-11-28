@@ -28,7 +28,7 @@
 
 defaults:
   gy39_id: gy39
-  gy39_name_prefix: ""              # e.g. "Balcony " or "陽台 " (with trailing space)
+  gy39_name_prefix: ""              # e.g. "Balcony " or "陽台 " (trailing space); several modules: prefixes must differ in ASCII
   gy39_update_interval: 60s
   gy39_tendency_language: en        # en / zh-TW
   gy39_temperature_offset: "0"      # °C
