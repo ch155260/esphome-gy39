@@ -41,7 +41,7 @@ GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上�
 ## 目錄
 
 - [安裝](#安裝)
-- [以 Package 匯入](#以-package-匯入)
+- [Package 參考](#package-參考)
 - [手動設定](#手動設定)
 - [UART 與 I2C 怎麼選](#uart-與-i2c-怎麼選)
 - [接線](#接線)
@@ -60,10 +60,54 @@ GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上�
 
 ## 安裝
 
-**建議做法：用 package 匯入。** 只要一段 `packages:`，就會加上元件、匯流排（UART）和所有建議的感測器。
-請參考[以 Package 匯入](#以-package-匯入)，以及完整的 [UART](#uart-使用範例)、[I2C](#i2c-使用範例) 範例。
+### 方法一：用 Package 匯入（建議）
 
-**另一種做法：只載入元件**，感測器設定自己寫（見[手動設定](#手動設定)）：
+只要一段 `packages:`，就會加上元件、匯流排（UART）和所有[建議的感測器](#手動設定)。
+你只需要在 `vars:` 底下設定幾個變數。
+
+**UART 模式**（出廠預設，S0 懸空）：package 會自己建立 UART 匯流排。
+
+```yaml
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "31"     # 必填：感測器的海拔（m）
+          gy39_tx_pin: GPIO17             # ESP TX -> GY-39 DR
+          gy39_rx_pin: GPIO16             # ESP RX <- GY-39 CT
+          gy39_tendency_language: zh-TW   # 趨勢文字用中文
+```
+
+**I2C 模式**（S0 接 GND）：package 會使用你設定檔裡的 `i2c:` 匯流排。
+
+```yaml
+i2c:
+  sda: GPIO4                              # 接 GY-39 的 DR
+  scl: GPIO5                              # 接 GY-39 的 CT
+  frequency: 50kHz
+
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "31"     # 必填
+          gy39_tendency_language: zh-TW
+```
+
+- 完整的裝置設定：[UART 使用範例](#uart-使用範例)、[I2C 使用範例](#i2c-使用範例)，或 [`examples/`](examples/) 資料夾裡的檔案。
+- 所有變數、如何修改或拿掉感測器、如何接多顆模組：請看 [Package 參考](#package-參考)。
+
+### 方法二：只載入元件
+
+如果想自己撰寫感測器設定（見[手動設定](#手動設定)）：
 
 ```yaml
 external_components:
@@ -71,29 +115,13 @@ external_components:
     components: [gy39]
 ```
 
-想固定在某個版本的話，把 `@main`（以及 package 的 `ref`）換成 tag 或 commit hash。
+**固定版本：** 把 `main`（package 的 `ref`、`gy39_ref`，或上面的 `@main`）換成 tag 或 commit hash。
 
 ---
 
-## 以 Package 匯入
+## Package 參考
 
-不想自己寫 `external_components` 和每一個感測器的話，可以直接匯入本 repo 準備好的
-[package](https://esphome.io/components/packages/)：
-
-```yaml
-packages:
-  gy39:
-    url: https://github.com/ch155260/esphome-gy39
-    ref: main                 # 也可以填 tag 或 commit 來固定版本
-    refresh: 1d
-    files:
-      - path: packages/gy39-uart.yaml      # I2C 模式改用 packages/gy39-i2c.yaml
-        vars:
-          gy39_station_altitude: "31"      # 必填
-          gy39_tx_pin: GPIO17
-          gy39_rx_pin: GPIO16
-          gy39_tendency_language: zh-TW
-```
+[方法一](#方法一用-package-匯入建議)的詳細說明。
 
 | Package | 匯流排 |
 |---|---|

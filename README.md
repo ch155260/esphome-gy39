@@ -37,7 +37,7 @@ Calculated values are only computed when they are configured.
 ## Table of contents
 
 - [Installation](#installation)
-- [Package (quickest setup)](#package-quickest-setup)
+- [Package reference](#package-reference)
 - [Manual configuration](#manual-configuration)
 - [Choosing UART or I2C](#choosing-uart-or-i2c)
 - [Wiring](#wiring)
@@ -56,12 +56,52 @@ Calculated values are only computed when they are configured.
 
 ## Installation
 
-**Recommended: import the package.** One `packages:` block adds the component, the bus (UART)
-and all recommended sensors. See [Package](#package-quickest-setup), plus the complete
-[UART](#uart-example) and [I2C](#i2c-example) examples.
+### Option 1: Import the package (recommended)
 
-**Alternative: load only the component** and write the sensor configuration yourself
-(see [Manual configuration](#manual-configuration)):
+One `packages:` block adds the component, the bus (UART), and all
+[recommended sensors](#manual-configuration). You only set a few variables under `vars:`.
+
+**UART mode** (factory default, S0 unconnected). The package creates the UART bus:
+
+```yaml
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "31"   # required: sensor height above sea level (m)
+          gy39_tx_pin: GPIO17           # ESP TX -> GY-39 DR
+          gy39_rx_pin: GPIO16           # ESP RX <- GY-39 CT
+```
+
+**I2C mode** (S0 tied to GND). The package uses the `i2c:` bus from your config:
+
+```yaml
+i2c:
+  sda: GPIO4                            # -> GY-39 DR
+  scl: GPIO5                            # -> GY-39 CT
+  frequency: 50kHz
+
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "31"   # required
+```
+
+- Complete device configs: [UART example](#uart-example), [I2C example](#i2c-example), or the files in [`examples/`](examples/).
+- All variables, how to change or remove sensors, and how to use several modules: see [Package reference](#package-reference).
+
+### Option 2: Load only the component
+
+If you prefer to write the sensor configuration yourself (see [Manual configuration](#manual-configuration)):
 
 ```yaml
 external_components:
@@ -69,28 +109,13 @@ external_components:
     components: [gy39]
 ```
 
-To pin a specific version, replace `@main` (and the package `ref`) with a tag or commit hash.
+**Pinning a version:** replace `main` (the package `ref`, `gy39_ref`, or the `@main` above) with a tag or commit hash.
 
 ---
 
-## Package (quickest setup)
+## Package reference
 
-Instead of writing `external_components` and every sensor yourself, you can import a
-ready-made [package](https://esphome.io/components/packages/) from this repository:
-
-```yaml
-packages:
-  gy39:
-    url: https://github.com/ch155260/esphome-gy39
-    ref: main                 # or a tag / commit to pin a version
-    refresh: 1d
-    files:
-      - path: packages/gy39-uart.yaml      # or packages/gy39-i2c.yaml
-        vars:
-          gy39_station_altitude: "31"      # required
-          gy39_tx_pin: GPIO17
-          gy39_rx_pin: GPIO16
-```
+Details for [Option 1](#option-1-import-the-package-recommended).
 
 | Package | Bus |
 |---|---|
