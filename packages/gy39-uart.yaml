@@ -65,6 +65,11 @@ defaults:
   # 元件版本（分支 / tag / commit）；請和 package 的 ref 相同
   gy39_ref: main
 
+  # How often ESPHome re-downloads the component; keep it equal to the package "refresh"
+  # (otherwise the package and the component can be different versions)
+  # 元件多久重新下載一次；請和 package 的 refresh 相同（否則 package 和元件可能版本不一致）
+  gy39_refresh: 1d
+
   gy39_tx_pin: GPIO17               # ESP TX -> GY-39 DR
   gy39_rx_pin: GPIO16               # ESP RX <- GY-39 CT
   gy39_baud_rate: "9600"            # factory default / 出廠預設
@@ -72,7 +77,7 @@ defaults:
 external_components:
   - source: github://ch155260/esphome-gy39@${gy39_ref}
     components: [gy39]
-    refresh: 1d
+    refresh: ${gy39_refresh}
 
 uart:
   - id: ${gy39_id}_uart

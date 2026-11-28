@@ -145,9 +145,14 @@ external_components:
 | `gy39_pressure_offset` | 兩者 | `0` | 氣壓修正（hPa） |
 | `gy39_failure_timeout` | 兩者 | `60s` | 見[設定選項](#設定選項)中的 `failure_timeout` |
 | `gy39_ref` | 兩者 | `main` | 元件的 git 版本，請設成和 package 的 `ref` 相同 |
+| `gy39_refresh` | 兩者 | `1d` | 元件多久重新下載一次，請設成和 package 的 `refresh` 相同 |
 | `gy39_tx_pin` / `gy39_rx_pin` | UART | `GPIO17` / `GPIO16` | ESP TX → GY-39 DR、ESP RX ← GY-39 CT |
 | `gy39_baud_rate` | UART | `9600` | UART 鮑率 |
 | `gy39_address` | I2C | `0x5B` | I2C 位址 |
+
+**讓 package 和元件保持同一版本。** package 檔和元件是分開下載、分開快取的。
+如果你改了 package 的 `ref` 或 `refresh`，請把 `gy39_ref`／`gy39_refresh` 設成一樣的值。否則可能出現「package 是新版、元件還是舊版快取」的情況，
+導致 `[failure_timeout] is an invalid option` 這類錯誤。
 
 **修改 package 的內容。** 感測器平台本身的 ID 是 `${gy39_id}_sensor`。不能只叫 `gy39`，因為這個名稱被元件本身佔用了。
 用 `!extend` 修改設定，用 `!remove` 拿掉不要的感測器：

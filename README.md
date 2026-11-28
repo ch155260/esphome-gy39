@@ -139,9 +139,14 @@ so a top-level substitution only works for `gy39_station_altitude`, which has no
 | `gy39_pressure_offset` | both | `0` | hPa |
 | `gy39_failure_timeout` | both | `60s` | See `failure_timeout` in [Configuration variables](#configuration-variables) |
 | `gy39_ref` | both | `main` | Git ref of the component. Set it to the same value as the package `ref` |
+| `gy39_refresh` | both | `1d` | How often the component is re-downloaded. Set it to the same value as the package `refresh` |
 | `gy39_tx_pin` / `gy39_rx_pin` | UART | `GPIO17` / `GPIO16` | ESP TX → GY-39 DR, ESP RX ← GY-39 CT |
 | `gy39_baud_rate` | UART | `9600` | UART baud rate |
 | `gy39_address` | I2C | `0x5B` | I2C address |
+
+**Keep package and component in step.** The package files and the component are downloaded and cached separately.
+If you change the package's `ref` or `refresh`, set `gy39_ref` / `gy39_refresh` to the same values. Otherwise a fresh
+package can meet an older cached component, and you get errors like `[failure_timeout] is an invalid option`.
 
 **Changing the package.** The platform entry has the ID `${gy39_id}_sensor` (not just `gy39`, because that name
 is reserved for the integration). Use `!extend` to change options and `!remove` to drop sensors:
