@@ -12,16 +12,24 @@ esp32:
   framework:
     type: esp-idf
 
+# One place controls the version of both the package and the component
+# 同時控制 package 和元件版本的地方
+substitutions:
+  gy39_version: main      # branch / tag / commit (e.g. v1.1.0) / 分支、tag 或 commit
+  gy39_refresh: 1d        # re-download interval; "always" while testing / 重新下載頻率，測試時可用 always
+
 logger:
 
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component = package version / 元件與 package 同版本
+          gy39_refresh: ${gy39_refresh}   # component = package refresh / 元件與 package 同更新頻率
           gy39_station_altitude: "35"     # required: sensor height above sea level (m) / 必填：感測器海拔（m）
           gy39_tx_pin: GPIO17             # ESP TX -> GY-39 DR
           gy39_rx_pin: GPIO16             # ESP RX <- GY-39 CT

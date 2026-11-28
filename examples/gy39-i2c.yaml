@@ -9,6 +9,12 @@ esphome:
 esp8266:
   board: d1_mini
 
+# One place controls the version of both the package and the component
+# 同時控制 package 和元件版本的地方
+substitutions:
+  gy39_version: main      # branch / tag / commit (e.g. v1.1.0) / 分支、tag 或 commit
+  gy39_refresh: 1d        # re-download interval; "always" while testing / 重新下載頻率，測試時可用 always
+
 logger:
 
 # The I2C package uses the bus from this config / I2C package 使用這裡定義的匯流排
@@ -21,11 +27,13 @@ i2c:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-i2c.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component = package version / 元件與 package 同版本
+          gy39_refresh: ${gy39_refresh}   # component = package refresh / 元件與 package 同更新頻率
           gy39_station_altitude: "35"     # required: sensor height above sea level (m) / 必填：感測器海拔（m）
           # gy39_name_prefix: "陽台 "     # entity name prefix / 實體名稱前綴
           # gy39_tendency_language: zh-TW # Chinese tendency text / 中文趨勢文字

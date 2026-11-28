@@ -60,18 +60,26 @@ Calculated values are only computed when they are configured.
 
 One `packages:` block adds the component, the bus (UART), and all
 [recommended sensors](#manual-configuration). You only set a few variables under `vars:`.
+The two `substitutions` at the top control the version and update interval of the package **and** the component together, so change only those two
+(see [Package reference](#package-reference)).
 
 **UART mode** (factory default, S0 unconnected). The package creates the UART bus:
 
 ```yaml
+substitutions:
+  gy39_version: main      # branch / tag / commit, e.g. v1.1.0 — package and component together
+  gy39_refresh: 1d        # how often to re-download; "always" while testing new versions
+
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component: same version as the package
+          gy39_refresh: ${gy39_refresh}   # component: same refresh as the package
           gy39_station_altitude: "31"   # required: sensor height above sea level (m)
           gy39_tx_pin: GPIO17           # ESP TX -> GY-39 DR
           gy39_rx_pin: GPIO16           # ESP RX <- GY-39 CT
@@ -80,6 +88,10 @@ packages:
 **I2C mode** (S0 tied to GND). The package uses the `i2c:` bus from your config:
 
 ```yaml
+substitutions:
+  gy39_version: main      # branch / tag / commit, e.g. v1.1.0 — package and component together
+  gy39_refresh: 1d        # how often to re-download; "always" while testing new versions
+
 i2c:
   sda: GPIO4                            # -> GY-39 DR
   scl: GPIO5                            # -> GY-39 CT
@@ -88,11 +100,13 @@ i2c:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-i2c.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component: same version as the package
+          gy39_refresh: ${gy39_refresh}   # component: same refresh as the package
           gy39_station_altitude: "31"   # required
 ```
 
@@ -145,8 +159,28 @@ so a top-level substitution only works for `gy39_station_altitude`, which has no
 | `gy39_address` | I2C | `0x5B` | I2C address |
 
 **Keep package and component in step.** The package files and the component are downloaded and cached separately.
-If you change the package's `ref` or `refresh`, set `gy39_ref` / `gy39_refresh` to the same values. Otherwise a fresh
-package can meet an older cached component, and you get errors like `[failure_timeout] is an invalid option`.
+The examples therefore use two top-level substitutions that feed both:
+
+```yaml
+substitutions:
+  gy39_version: main      # or a tag such as v1.1.0
+  gy39_refresh: 1d        # or always
+
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "31"
+          gy39_ref: ${gy39_version}       # component uses the same version
+          gy39_refresh: ${gy39_refresh}   # and the same refresh
+```
+
+Change only `gy39_version` / `gy39_refresh`. If the two get out of step (a new package with an older cached component),
+you get errors like `[failure_timeout] is an invalid option`.
 
 **Changing the package.** The platform entry has the ID `${gy39_id}_sensor` (not just `gy39`, because that name
 is reserved for the integration). Use `!extend` to change options and `!remove` to drop sensors:
@@ -286,6 +320,10 @@ esphome:
   name: gy39-uart
   friendly_name: GY39
 
+substitutions:
+  gy39_version: main      # branch / tag / commit, e.g. v1.1.0 — package and component together
+  gy39_refresh: 1d        # how often to re-download; "always" while testing new versions
+
 esp32:
   board: esp32dev
   framework:
@@ -296,11 +334,13 @@ logger:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component: same version as the package
+          gy39_refresh: ${gy39_refresh}   # component: same refresh as the package
           gy39_station_altitude: "35"   # required: sensor height above sea level (m)
           gy39_tx_pin: GPIO17           # ESP TX -> GY-39 DR (module RX)
           gy39_rx_pin: GPIO16           # ESP RX <- GY-39 CT (module TX)
@@ -312,17 +352,23 @@ ESP8266 has only one full hardware UART (GPIO1/GPIO3), which the logger uses by 
 Either free it from the logger:
 
 ```yaml
+substitutions:
+  gy39_version: main      # branch / tag / commit, e.g. v1.1.0 — package and component together
+  gy39_refresh: 1d        # how often to re-download; "always" while testing new versions
+
 logger:
   baud_rate: 0                          # free hardware UART0 for the sensor
 
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component: same version as the package
+          gy39_refresh: ${gy39_refresh}   # component: same refresh as the package
           gy39_station_altitude: "35"
           gy39_tx_pin: GPIO1
           gy39_rx_pin: GPIO3
@@ -331,14 +377,20 @@ packages:
 or keep serial logging and use software serial on other pins:
 
 ```yaml
+substitutions:
+  gy39_version: main      # branch / tag / commit, e.g. v1.1.0 — package and component together
+  gy39_refresh: 1d        # how often to re-download; "always" while testing new versions
+
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component: same version as the package
+          gy39_refresh: ${gy39_refresh}   # component: same refresh as the package
           gy39_station_altitude: "35"
           gy39_tx_pin: GPIO14           # D5, software serial
           gy39_rx_pin: GPIO12           # D6, software serial (9600 baud is fine)
@@ -361,6 +413,10 @@ esphome:
   name: gy39-i2c
   friendly_name: GY39
 
+substitutions:
+  gy39_version: main      # branch / tag / commit, e.g. v1.1.0 — package and component together
+  gy39_refresh: 1d        # how often to re-download; "always" while testing new versions
+
 esp8266:
   board: d1_mini
 
@@ -375,11 +431,13 @@ i2c:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-i2c.yaml
         vars:
+          gy39_ref: ${gy39_version}       # component: same version as the package
+          gy39_refresh: ${gy39_refresh}   # component: same refresh as the package
           gy39_station_altitude: "35"   # required: sensor height above sea level (m)
 ```
 

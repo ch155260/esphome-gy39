@@ -64,18 +64,26 @@ GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上�
 
 只要一段 `packages:`，就會加上元件、匯流排（UART）和所有[建議的感測器](#手動設定)。
 你只需要在 `vars:` 底下設定幾個變數。
+最上面的兩個 `substitutions` 會**同時**控制 package 和元件的版本與更新頻率，之後只要改這兩個值就好
+（見 [Package 參考](#package-參考)）。
 
 **UART 模式**（出廠預設，S0 懸空）：package 會自己建立 UART 匯流排。
 
 ```yaml
+substitutions:
+  gy39_version: main      # 分支 / tag / commit，例如 v1.1.0；package 和元件會一起切換
+  gy39_refresh: 1d        # 多久重新下載一次；測試新版時可以設成 always
+
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # 元件：和 package 同一個版本
+          gy39_refresh: ${gy39_refresh}   # 元件：和 package 同一個更新頻率
           gy39_station_altitude: "31"     # 必填：感測器的海拔（m）
           gy39_tx_pin: GPIO17             # ESP TX -> GY-39 DR
           gy39_rx_pin: GPIO16             # ESP RX <- GY-39 CT
@@ -85,6 +93,10 @@ packages:
 **I2C 模式**（S0 接 GND）：package 會使用你設定檔裡的 `i2c:` 匯流排。
 
 ```yaml
+substitutions:
+  gy39_version: main      # 分支 / tag / commit，例如 v1.1.0；package 和元件會一起切換
+  gy39_refresh: 1d        # 多久重新下載一次；測試新版時可以設成 always
+
 i2c:
   sda: GPIO4                              # 接 GY-39 的 DR
   scl: GPIO5                              # 接 GY-39 的 CT
@@ -93,11 +105,13 @@ i2c:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-i2c.yaml
         vars:
+          gy39_ref: ${gy39_version}       # 元件：和 package 同一個版本
+          gy39_refresh: ${gy39_refresh}   # 元件：和 package 同一個更新頻率
           gy39_station_altitude: "31"     # 必填
           gy39_tendency_language: zh-TW
 ```
@@ -151,8 +165,28 @@ external_components:
 | `gy39_address` | I2C | `0x5B` | I2C 位址 |
 
 **讓 package 和元件保持同一版本。** package 檔和元件是分開下載、分開快取的。
-如果你改了 package 的 `ref` 或 `refresh`，請把 `gy39_ref`／`gy39_refresh` 設成一樣的值。否則可能出現「package 是新版、元件還是舊版快取」的情況，
-導致 `[failure_timeout] is an invalid option` 這類錯誤。
+所以範例都在最上層用兩個 `substitutions` 同時控制兩邊：
+
+```yaml
+substitutions:
+  gy39_version: main      # 或 tag，例如 v1.1.0
+  gy39_refresh: 1d        # 或 always
+
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "31"
+          gy39_ref: ${gy39_version}       # 元件使用同一個版本
+          gy39_refresh: ${gy39_refresh}   # 和同一個更新頻率
+```
+
+之後只要改 `gy39_version`／`gy39_refresh` 這兩個值就好。如果兩邊不同步（package 是新版、元件還是舊版快取），
+就會出現 `[failure_timeout] is an invalid option` 這類錯誤。
 
 **修改 package 的內容。** 感測器平台本身的 ID 是 `${gy39_id}_sensor`。不能只叫 `gy39`，因為這個名稱被元件本身佔用了。
 用 `!extend` 修改設定，用 `!remove` 拿掉不要的感測器：
@@ -292,6 +326,10 @@ esphome:
   name: gy39-uart
   friendly_name: GY39
 
+substitutions:
+  gy39_version: main      # 分支 / tag / commit，例如 v1.1.0；package 和元件會一起切換
+  gy39_refresh: 1d        # 多久重新下載一次；測試新版時可以設成 always
+
 esp32:
   board: esp32dev
   framework:
@@ -302,11 +340,13 @@ logger:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # 元件：和 package 同一個版本
+          gy39_refresh: ${gy39_refresh}   # 元件：和 package 同一個更新頻率
           gy39_station_altitude: "35"     # 必填：感測器的海拔（m）
           gy39_tx_pin: GPIO17             # ESP TX -> GY-39 DR（模組 RX）
           gy39_rx_pin: GPIO16             # ESP RX <- GY-39 CT（模組 TX）
@@ -319,17 +359,23 @@ ESP8266 只有一組完整的硬體 UART（GPIO1/GPIO3），而且預設被 logg
 第一種做法是把它從 logger 讓出來：
 
 ```yaml
+substitutions:
+  gy39_version: main      # 分支 / tag / commit，例如 v1.1.0；package 和元件會一起切換
+  gy39_refresh: 1d        # 多久重新下載一次；測試新版時可以設成 always
+
 logger:
   baud_rate: 0                            # 把硬體 UART0 讓給感測器
 
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # 元件：和 package 同一個版本
+          gy39_refresh: ${gy39_refresh}   # 元件：和 package 同一個更新頻率
           gy39_station_altitude: "35"
           gy39_tx_pin: GPIO1
           gy39_rx_pin: GPIO3
@@ -338,14 +384,20 @@ packages:
 第二種做法是保留序列埠 log，改用其他腳位的軟體序列埠：
 
 ```yaml
+substitutions:
+  gy39_version: main      # 分支 / tag / commit，例如 v1.1.0；package 和元件會一起切換
+  gy39_refresh: 1d        # 多久重新下載一次；測試新版時可以設成 always
+
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-uart.yaml
         vars:
+          gy39_ref: ${gy39_version}       # 元件：和 package 同一個版本
+          gy39_refresh: ${gy39_refresh}   # 元件：和 package 同一個更新頻率
           gy39_station_altitude: "35"
           gy39_tx_pin: GPIO14             # D5，軟體序列埠
           gy39_rx_pin: GPIO12             # D6，軟體序列埠（9600 baud 沒問題）
@@ -367,6 +419,10 @@ esphome:
   name: gy39-i2c
   friendly_name: GY39
 
+substitutions:
+  gy39_version: main      # 分支 / tag / commit，例如 v1.1.0；package 和元件會一起切換
+  gy39_refresh: 1d        # 多久重新下載一次；測試新版時可以設成 always
+
 esp8266:
   board: d1_mini
 
@@ -381,11 +437,13 @@ i2c:
 packages:
   gy39:
     url: https://github.com/ch155260/esphome-gy39
-    ref: main
-    refresh: 1d
+    ref: ${gy39_version}
+    refresh: ${gy39_refresh}
     files:
       - path: packages/gy39-i2c.yaml
         vars:
+          gy39_ref: ${gy39_version}       # 元件：和 package 同一個版本
+          gy39_refresh: ${gy39_refresh}   # 元件：和 package 同一個更新頻率
           gy39_station_altitude: "35"     # 必填：感測器的海拔（m）
           gy39_name_prefix: "陽台 "       # 實體名稱前綴（選填）
           gy39_tendency_language: zh-TW   # 趨勢文字用中文
