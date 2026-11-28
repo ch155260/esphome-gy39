@@ -1,4 +1,17 @@
-# GY-39 package (I2C, S0 tied to GND) for ESPHome — https://github.com/ch155260/esphome-gy39
+# =====================================================================
+# GY-39 package — I2C mode through the on-board MCU (address 0x5B)
+# https://github.com/ch155260/esphome-gy39
+#
+# Wiring: VCC -> 3V3, GND -> GND, CT -> SCL, DR -> SDA
+#         S0 tied to GND (I2C mode; power-cycle the module after changing it)
+#         Leave the chip-side SCL/SDA/INT pins (if your board has them) unconnected
+#
+# Your main config must define the I2C bus, e.g.
+#   i2c:
+#     sda: GPIO4
+#     scl: GPIO5
+#     frequency: 50kHz     # recommended, the MCU is slow
+# With several buses, select one:  sensor: [{id: !extend gy39_sensor, i2c_id: my_bus}]
 #
 # packages:
 #   gy39:
@@ -7,89 +20,76 @@
 #     files:
 #       - path: packages/gy39-i2c.yaml
 #         vars:
-#           gy39_station_altitude: "31"   # REQUIRED: sensor height above sea level (m)
-#           gy39_sda_pin: GPIO4
-#           gy39_scl_pin: GPIO5
+#           gy39_station_altitude: "31"
 #
-# Variables (all optional except gy39_station_altitude):
-#   gy39_name               entity name prefix (ASCII)          default "GY39"
-#   gy39_sda_pin            SDA -> GY-39 DR                     default GPIO4
-#   gy39_scl_pin            SCL -> GY-39 CT                     default GPIO5
-#   gy39_i2c_frequency      bus frequency                       default 50kHz
-#   gy39_station_altitude   sensor height above sea level, m    REQUIRED
-#   gy39_update_interval    polling interval                    default 60s
-#   gy39_tendency_language  en | zh-TW                          default en
-#   gy39_ref                git ref of the component            default main
-#
-# Entity IDs: gy39_sensor (the platform entry), gy39_temperature, gy39_humidity,
-# gy39_pressure, gy39_illuminance, gy39_dew_point, gy39_absolute_humidity,
-# gy39_mixing_ratio, gy39_sea_level_pressure, gy39_pressure_trend_3h,
-# gy39_pressure_trend_24h, gy39_pressure_tendency.
-# Change or remove options with  sensor: [{id: !extend gy39_sensor, ...}]  (see README).
+# IDs: ${gy39_id}_sensor (platform entry, use with !extend),
+#      ${gy39_id}_temperature, ${gy39_id}_dew_point, ... (one per sensor below)
+# =====================================================================
 
-substitutions:
-  gy39_name: "GY39"
+defaults:
+  gy39_id: gy39
+  gy39_name_prefix: ""              # e.g. "Balcony " or "陽台 " (with trailing space)
   gy39_update_interval: 60s
-  gy39_tendency_language: en
-  gy39_ref: main
-  gy39_sda_pin: GPIO4
-  gy39_scl_pin: GPIO5
-  gy39_i2c_frequency: 50kHz
+  gy39_tendency_language: en        # en / zh-TW
+  gy39_temperature_offset: "0"      # °C
+  gy39_pressure_offset: "0"         # hPa
+  gy39_failure_timeout: 60s         # no good reading for this long -> values become unknown (NaN)
+  gy39_ref: main                    # component version: branch / tag / commit
+  # gy39_station_altitude           REQUIRED, no default: sensor height above sea level (m)
+  gy39_address: "0x5B"
 
 external_components:
   - source: github://ch155260/esphome-gy39@${gy39_ref}
     components: [gy39]
     refresh: 1d
 
-# Already have an I2C bus? Do NOT reuse the id "gy39_i2c" (ESPHome reports it as redefined).
-# Either change this bus:      i2c: [{id: !extend gy39_i2c, scan: true}]
-# or keep yours and drop it:   i2c: [{id: !remove gy39_i2c}, {id: my_bus, ...}]
-#                              sensor: [{id: !extend gy39_sensor, i2c_id: my_bus}]
-i2c:
-  - id: gy39_i2c
-    sda: ${gy39_sda_pin}
-    scl: ${gy39_scl_pin}
-    frequency: ${gy39_i2c_frequency}
-
 sensor:
   - platform: gy39
-    id: gy39_sensor
+    id: ${gy39_id}_sensor            # not just "gy39": that clashes with the integration name
     interface: i2c
-    i2c_id: gy39_i2c
-    address: 0x5B
+    address: ${gy39_address}
     update_interval: ${gy39_update_interval}
     station_altitude: ${gy39_station_altitude}
     tendency_language: ${gy39_tendency_language}
+    temperature_offset: ${gy39_temperature_offset}
+    pressure_offset: ${gy39_pressure_offset}
+    failure_timeout: ${gy39_failure_timeout}
+
+    # ---------- Measured / 實測值 ----------
     temperature:
-      id: gy39_temperature
-      name: "${gy39_name} Temperature"
+      id: ${gy39_id}_temperature
+      name: "${gy39_name_prefix}Temperature"
     humidity:
-      id: gy39_humidity
-      name: "${gy39_name} Humidity"
+      id: ${gy39_id}_humidity
+      name: "${gy39_name_prefix}Humidity"
     pressure:
-      id: gy39_pressure
-      name: "${gy39_name} Pressure"
+      id: ${gy39_id}_pressure
+      name: "${gy39_name_prefix}Pressure"
     illuminance:
-      id: gy39_illuminance
-      name: "${gy39_name} Illuminance"
+      id: ${gy39_id}_illuminance
+      name: "${gy39_name_prefix}Illuminance"
+
+    # ---------- Calculated / 計算值 ----------
     dew_point:
-      id: gy39_dew_point
-      name: "${gy39_name} Dew Point"
+      id: ${gy39_id}_dew_point
+      name: "${gy39_name_prefix}Dew Point"
     absolute_humidity:
-      id: gy39_absolute_humidity
-      name: "${gy39_name} Absolute Humidity"
+      id: ${gy39_id}_absolute_humidity
+      name: "${gy39_name_prefix}Absolute Humidity"
     mixing_ratio:
-      id: gy39_mixing_ratio
-      name: "${gy39_name} Mixing Ratio"
+      id: ${gy39_id}_mixing_ratio
+      name: "${gy39_name_prefix}Mixing Ratio"
     sea_level_pressure:
-      id: gy39_sea_level_pressure
-      name: "${gy39_name} Sea Level Pressure"
+      id: ${gy39_id}_sea_level_pressure
+      name: "${gy39_name_prefix}Sea Level Pressure"
+
+    # ---------- Trends (published every 10 min / on change) / 趨勢 ----------
     pressure_trend_3h:
-      id: gy39_pressure_trend_3h
-      name: "${gy39_name} Pressure Trend 3h"
+      id: ${gy39_id}_pressure_trend_3h
+      name: "${gy39_name_prefix}Pressure Trend 3h"
     pressure_trend_24h:
-      id: gy39_pressure_trend_24h
-      name: "${gy39_name} Pressure Trend 24h"
+      id: ${gy39_id}_pressure_trend_24h
+      name: "${gy39_name_prefix}Pressure Trend 24h"
     pressure_tendency:
-      id: gy39_pressure_tendency
-      name: "${gy39_name} Pressure Tendency"
+      id: ${gy39_id}_pressure_tendency
+      name: "${gy39_name_prefix}Pressure Tendency"

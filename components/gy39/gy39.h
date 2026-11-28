@@ -38,6 +38,7 @@ class GY39Component : public PollingComponent {
     this->humidity_offset_ = offset;
   }
   void set_pressure_offset(float o_hpa) { this->pressure_offset_ = o_hpa; }
+  void set_failure_timeout(uint32_t ms) { this->failure_timeout_ms_ = ms; }
 
   /// Apply calibration. RH is calibrated first (at the sensor's own temperature); the temperature
   /// offset is then applied and RH re-evaluated at the corrected temperature with the vapour
@@ -79,6 +80,9 @@ class GY39Component : public PollingComponent {
   /// Feed one station-pressure reading (Pa) into the 10-minute history.
   void update_pressure_history_(double pressure_pa);
   void publish_trends_();
+  /// A read failed. Once no good reading arrived for failure_timeout, publish NAN for the affected
+  /// live and calculated values; the pressure history records the gap (trends become NAN too).
+  void report_failure_(bool lux, bool bme);
   float history_ago_(uint16_t bins) const;
 
   /// Pressure history: 10-minute means, 24 h + 1 bins (needed for the 24 h difference).
@@ -98,6 +102,9 @@ class GY39Component : public PollingComponent {
   float humidity_offset_{0.0f};
   float pressure_offset_{0.0f};
   bool tendency_zh_{false};
+  uint32_t failure_timeout_ms_{60000};
+  uint32_t last_lux_ok_{0};
+  uint32_t last_bme_ok_{0};
 
   sensor::Sensor *illuminance_sensor_{nullptr};
   sensor::Sensor *temperature_sensor_{nullptr};

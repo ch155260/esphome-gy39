@@ -37,6 +37,7 @@ UNIT_GRAMS_PER_KILOGRAM = "g/kg"
 CONF_TEMPERATURE_OFFSET = "temperature_offset"
 CONF_HUMIDITY_CALIBRATION = "humidity_calibration"
 CONF_PRESSURE_OFFSET = "pressure_offset"
+CONF_FAILURE_TIMEOUT = "failure_timeout"
 
 
 def _calibration_point(value):
@@ -142,6 +143,9 @@ BASE_SCHEMA = cv.Schema(
         cv.Optional(CONF_TEMPERATURE_OFFSET, default=0.0): cv.float_range(min=-10, max=10),
         cv.Optional(CONF_HUMIDITY_CALIBRATION): _humidity_calibration,
         cv.Optional(CONF_PRESSURE_OFFSET, default=0.0): cv.float_range(min=-20, max=20),
+        cv.Optional(
+            CONF_FAILURE_TIMEOUT, default="60s"
+        ): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_TENDENCY_LANGUAGE, default="en"): cv.one_of("en", "zh-TW", lower=False),
     }
 ).extend(cv.polling_component_schema("60s"))
@@ -206,6 +210,7 @@ async def to_code(config):
     cg.add(var.set_tendency_language_zh(config[CONF_TENDENCY_LANGUAGE] == "zh-TW"))
     cg.add(var.set_temperature_offset(config[CONF_TEMPERATURE_OFFSET]))
     cg.add(var.set_pressure_offset(config[CONF_PRESSURE_OFFSET]))
+    cg.add(var.set_failure_timeout(config[CONF_FAILURE_TIMEOUT].total_milliseconds))
     if CONF_HUMIDITY_CALIBRATION in config:
         pts = config[CONF_HUMIDITY_CALIBRATION]
         if len(pts) == 1:

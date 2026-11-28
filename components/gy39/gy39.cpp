@@ -33,6 +33,7 @@ void GY39Component::dump_config() {
   LOG_SENSOR("  ", "Pressure Trend 3h", this->pressure_trend_3h_sensor_);
   LOG_SENSOR("  ", "Pressure Trend 24h", this->pressure_trend_24h_sensor_);
   LOG_TEXT_SENSOR("  ", "Pressure Tendency", this->pressure_tendency_text_sensor_);
+  ESP_LOGCONFIG(TAG, "  Failure timeout: %u s", (unsigned) (this->failure_timeout_ms_ / 1000));
   ESP_LOGCONFIG(TAG, "  Calibration: T offset %.2f°C, RH = %.4f * raw %+.2f, p offset %+.2f hPa",
                 this->temperature_offset_, this->humidity_gain_, this->humidity_offset_, this->pressure_offset_);
 }
@@ -267,8 +268,10 @@ void GY39Component::publish_trends_() {
     static const char *const ZH[] = {"非常快速下降", "快速下降", "下降", "緩慢下降", "平穩",
                                      "緩慢上升",     "上升",     "快速上升", "非常快速上升"};
     std::string text;
-    if (std::isnan(d3)) {
+    if (std::isnan(d3) && this->history_count_ <= 18) {
       text = this->tendency_zh_ ? "資料收集中" : "Collecting data";
+    } else if (std::isnan(d3)) {
+      text = this->tendency_zh_ ? "無資料" : "No data";  // a gap (read failures) at either end of the 3 h window
     } else {
       int idx = tendency_class(d3) + 4;
       text = this->tendency_zh_ ? ZH[idx] : EN[idx];
@@ -278,7 +281,34 @@ void GY39Component::publish_trends_() {
   }
 }
 
+void GY39Component::report_failure_(bool lux, bool bme) {
+  const uint32_t now = millis();
+  if (bme)
+    this->update_pressure_history_(NAN);  // keeps 10-minute bins advancing during an outage
+  if (lux && now - this->last_lux_ok_ >= this->failure_timeout_ms_ && this->illuminance_sensor_ != nullptr &&
+      !std::isnan(this->illuminance_sensor_->state)) {
+    ESP_LOGW(TAG, "No illuminance reading for %u s, publishing NaN", (unsigned) ((now - this->last_lux_ok_) / 1000));
+    this->illuminance_sensor_->publish_state(NAN);
+  }
+  if (bme && now - this->last_bme_ok_ >= this->failure_timeout_ms_) {
+    sensor::Sensor *const live[] = {this->temperature_sensor_,       this->pressure_sensor_,
+                                    this->humidity_sensor_,          this->altitude_sensor_,
+                                    this->absolute_humidity_sensor_, this->dew_point_sensor_,
+                                    this->mixing_ratio_sensor_,      this->sea_level_pressure_sensor_};
+    bool any = false;
+    for (auto *s : live) {
+      if (s != nullptr && !std::isnan(s->state)) {
+        s->publish_state(NAN);
+        any = true;
+      }
+    }
+    if (any)
+      ESP_LOGW(TAG, "No BME280 reading for %u s, publishing NaN", (unsigned) ((now - this->last_bme_ok_) / 1000));
+  }
+}
+
 void GY39Component::publish_lux_(uint32_t raw) {
+  this->last_lux_ok_ = millis();
   float lux = raw / 100.0f;
   ESP_LOGD(TAG, "Illuminance: %.2f lx", lux);
   if (this->illuminance_sensor_ != nullptr)
@@ -286,6 +316,7 @@ void GY39Component::publish_lux_(uint32_t raw) {
 }
 
 void GY39Component::publish_bme_(int16_t temp, uint32_t pressure, uint16_t humidity, int16_t altitude) {
+  this->last_bme_ok_ = millis();
   const double p_pa = pressure / 100.0 + this->pressure_offset_ * 100.0;  // raw is Pa*100
   double t_c, rh;
   apply_calibration(temp / 100.0, humidity / 100.0, p_pa, this->temperature_offset_, this->humidity_gain_,
@@ -411,6 +442,7 @@ void GY39UARTComponent::loop() {
 
   if ((this->want_lux_ || this->want_bme_) && millis() - this->last_request_ > RESPONSE_TIMEOUT_MS) {
     ESP_LOGW(TAG, "Timeout waiting for GY-39 response");
+    this->report_failure_(this->want_lux_, this->want_bme_);
     this->want_lux_ = this->want_bme_ = false;
     this->status_set_warning();
   }
@@ -472,6 +504,7 @@ void GY39I2CComponent::update() {
   if (this->read_register(0x00, b, sizeof(b)) != i2c::ERROR_OK) {
     ESP_LOGW(TAG, "Reading GY-39 registers failed");
     this->status_set_warning();
+    this->report_failure_(true, true);
     return;
   }
   this->status_clear_warning();
