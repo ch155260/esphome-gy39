@@ -1,39 +1,73 @@
 # =====================================================================
-# GY-39 package — UART mode (factory default, S0 floating)
+# GY-39 package — UART mode (factory default)
+# GY-39 package — UART 模式（出廠預設）
 # https://github.com/ch155260/esphome-gy39
 #
-# Wiring: VCC -> 3V3, GND -> GND, CT (module TX) -> ESP RX, DR (module RX) -> ESP TX
-# This package creates its own UART bus: ${gy39_id}_uart
+# Wiring / 接線:
+#   VCC -> 3V3, GND -> GND
+#   CT (module TX / 模組 TX) -> ESP RX (gy39_rx_pin)
+#   DR (module RX / 模組 RX) -> ESP TX (gy39_tx_pin)
+#   S0: leave unconnected / 懸空
 #
-# packages:
-#   gy39:
-#     url: https://github.com/ch155260/esphome-gy39
-#     ref: main
-#     files:
-#       - path: packages/gy39-uart.yaml
-#         vars:
-#           gy39_station_altitude: "31"
-#           gy39_tx_pin: GPIO17
-#           gy39_rx_pin: GPIO16
+# This package creates its own UART bus "${gy39_id}_uart".
+# 這個 package 會自己建立 UART 匯流排「${gy39_id}_uart」。
+# ESP8266 on GPIO1/GPIO3: also set "logger: baud_rate: 0"
+# ESP8266 接 GPIO1/GPIO3 時，主設定檔要加「logger: baud_rate: 0」
 #
-# IDs: ${gy39_id}_sensor (platform entry, use with !extend), ${gy39_id}_uart,
-#      ${gy39_id}_temperature, ${gy39_id}_dew_point, ... (one per sensor below)
-# ESP8266 on GPIO1/GPIO3: also set  logger: baud_rate: 0
+# Usage / 用法:
+#   packages:
+#     gy39:
+#       url: https://github.com/ch155260/esphome-gy39
+#       ref: main
+#       refresh: 1d
+#       files:
+#         - path: packages/gy39-uart.yaml
+#           vars:
+#             gy39_station_altitude: "31"
+#             gy39_tx_pin: GPIO17
+#             gy39_rx_pin: GPIO16
+#
+# Customise in your main config / 在主設定檔修改內容:
+#   sensor:
+#     - id: !extend gy39_sensor            # = ${gy39_id}_sensor
+#       humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
+#       illuminance: !remove               # drop a sensor / 拿掉不要的感測器
+#
+# Variables must be passed with vars: (top-level substitutions do NOT override these defaults)
+# 變數請用 vars: 傳入（主設定檔的 substitutions 蓋不掉這裡的 defaults）
 # =====================================================================
 
 defaults:
+  # REQUIRED, no default / 必填，沒有預設值:
+  #   gy39_station_altitude: sensor height above sea level (m) / 感測器的海拔（m）
+  #                          = ground elevation + mounting height / 地面海拔 + 安裝高度
+
+  # ID prefix of every entity; use a different value for each module
+  # 所有實體 ID 的前綴；接多顆模組時每顆要不同
   gy39_id: gy39
-  gy39_name_prefix: ""              # e.g. "Balcony " or "陽台 " (trailing space); several modules: prefixes must differ in ASCII
-  gy39_update_interval: 60s
-  gy39_tendency_language: en        # en / zh-TW
-  gy39_temperature_offset: "0"      # °C
-  gy39_pressure_offset: "0"         # hPa
-  gy39_failure_timeout: 60s         # no good reading for this long -> values become unknown (NaN)
-  gy39_ref: main                    # component version: branch / tag / commit
-  # gy39_station_altitude           REQUIRED, no default: sensor height above sea level (m)
+
+  # Entity name prefix, e.g. "Balcony " or "陽台 " (note the trailing space).
+  # Several modules: prefixes must differ in ASCII letters/digits.
+  # 實體名稱前綴，例如 "Balcony " 或 "陽台 "（注意結尾空格）。
+  # 多顆模組時，前綴要有英文或數字上的差異（中文在內部 ID 裡都會變成 _）。
+  gy39_name_prefix: ""
+
+  gy39_update_interval: 60s         # polling interval / 更新間隔
+  gy39_tendency_language: en        # en / zh-TW: language of the tendency text / 趨勢文字語言
+  gy39_temperature_offset: "0"      # °C, temperature correction / 溫度修正
+  gy39_pressure_offset: "0"         # hPa, pressure correction / 氣壓修正
+
+  # No good reading for this long -> values become unknown (NaN)
+  # 超過這段時間都沒有成功讀取 -> 數值變成「未知」
+  gy39_failure_timeout: 60s
+
+  # Component version (branch / tag / commit); keep it equal to the package "ref"
+  # 元件版本（分支 / tag / commit）；請和 package 的 ref 相同
+  gy39_ref: main
+
   gy39_tx_pin: GPIO17               # ESP TX -> GY-39 DR
   gy39_rx_pin: GPIO16               # ESP RX <- GY-39 CT
-  gy39_baud_rate: "9600"
+  gy39_baud_rate: "9600"            # factory default / 出廠預設
 
 external_components:
   - source: github://ch155260/esphome-gy39@${gy39_ref}
@@ -48,7 +82,9 @@ uart:
 
 sensor:
   - platform: gy39
-    id: ${gy39_id}_sensor            # not just "gy39": that clashes with the integration name
+    # Not just "gy39": that name is reserved for the integration
+    # 不能只寫 "gy39"：這個名稱被元件本身佔用
+    id: ${gy39_id}_sensor
     interface: uart
     uart_id: ${gy39_id}_uart
     update_interval: ${gy39_update_interval}
@@ -72,7 +108,7 @@ sensor:
       id: ${gy39_id}_illuminance
       name: "${gy39_name_prefix}Illuminance"
 
-    # ---------- Calculated / 計算值 ----------
+    # ---------- Calculated (not affected by self-heating) / 計算值（不受自熱影響） ----------
     dew_point:
       id: ${gy39_id}_dew_point
       name: "${gy39_name_prefix}Dew Point"
@@ -86,7 +122,8 @@ sensor:
       id: ${gy39_id}_sea_level_pressure
       name: "${gy39_name_prefix}Sea Level Pressure"
 
-    # ---------- Trends (published every 10 min / on change) / 趨勢 ----------
+    # ---------- Trends: published every 10 min (text: on change) ----------
+    # ---------- 趨勢：每 10 分鐘發布一次（文字：內容改變時才發布） ----------
     pressure_trend_3h:
       id: ${gy39_id}_pressure_trend_3h
       name: "${gy39_name_prefix}Pressure Trend 3h"

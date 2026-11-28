@@ -1,5 +1,11 @@
+# GY-39 in UART mode (factory default) on an ESP32, imported as a package.
+# GY-39 UART 模式（出廠預設），接在 ESP32 上，用 package 匯入。
+#
+# Wiring / 接線: VCC -> 3V3, GND -> GND, CT -> GPIO16 (ESP RX), DR -> GPIO17 (ESP TX), S0 unconnected / 懸空
+# ESP8266: see README "UART example" / ESP8266 請參考 README 的「UART 使用範例」
 esphome:
   name: gy39-uart
+  friendly_name: GY39
 
 esp32:
   board: esp32dev
@@ -8,48 +14,22 @@ esp32:
 
 logger:
 
-external_components:
-  - source: github://ch155260/esphome-gy39@main
-    components: [gy39]
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
     refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"     # required: sensor height above sea level (m) / 必填：感測器海拔（m）
+          gy39_tx_pin: GPIO17             # ESP TX -> GY-39 DR
+          gy39_rx_pin: GPIO16             # ESP RX <- GY-39 CT
+          # gy39_tendency_language: zh-TW # Chinese tendency text / 中文趨勢文字
 
-uart:
-  id: gy39_uart
-  tx_pin: GPIO17   # 接 GY-39 的 RX (DR)
-  rx_pin: GPIO16   # 接 GY-39 的 TX (CT)
-  baud_rate: 9600
-
-sensor:
-  - platform: gy39
-    interface: uart
-    uart_id: gy39_uart
-    update_interval: 60s
-    station_altitude: 35       # sensor height above mean sea level (m): ground elevation + mounting height
-    # Calibration (see README). Applied before every calculated value.
-    # temperature_offset: -0.8
-    # humidity_calibration:
-    #   - 34.0 -> 32.8         # MgCl2 salt test
-    #   - 77.5 -> 75.3         # NaCl salt test
-    # pressure_offset: 0.0
-    illuminance:
-      name: "GY39 Illuminance"
-    temperature:
-      name: "GY39 Temperature"
-    humidity:
-      name: "GY39 Humidity"
-    pressure:
-      name: "GY39 Pressure"
-    dew_point:
-      name: "GY39 Dew Point"
-    absolute_humidity:
-      name: "GY39 Absolute Humidity"
-    mixing_ratio:
-      name: "GY39 Mixing Ratio"
-    sea_level_pressure:
-      name: "GY39 Sea Level Pressure"
-    pressure_trend_3h:
-      name: "GY39 Pressure Trend 3h"
-    pressure_trend_24h:
-      name: "GY39 Pressure Trend 24h"
-    pressure_tendency:
-      name: "GY39 Pressure Tendency"
+# Optional: change the package / 選用：修改 package 內容
+# sensor:
+#   - id: !extend gy39_sensor
+#     temperature_offset: -0.8
+#     humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
+#     illuminance: !remove

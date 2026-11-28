@@ -38,7 +38,7 @@ Calculated values are only computed when they are configured.
 
 - [Installation](#installation)
 - [Package (quickest setup)](#package-quickest-setup)
-- [Recommended configuration](#recommended-configuration)
+- [Manual configuration](#manual-configuration)
 - [Choosing UART or I2C](#choosing-uart-or-i2c)
 - [Wiring](#wiring)
 - [UART example](#uart-example)
@@ -56,13 +56,20 @@ Calculated values are only computed when they are configured.
 
 ## Installation
 
+**Recommended: import the package.** One `packages:` block adds the component, the bus (UART)
+and all recommended sensors. See [Package](#package-quickest-setup), plus the complete
+[UART](#uart-example) and [I2C](#i2c-example) examples.
+
+**Alternative: load only the component** and write the sensor configuration yourself
+(see [Manual configuration](#manual-configuration)):
+
 ```yaml
 external_components:
   - source: github://ch155260/esphome-gy39@main
     components: [gy39]
 ```
 
-To pin a specific version, replace `@main` with a tag or commit hash.
+To pin a specific version, replace `@main` (and the package `ref`) with a tag or commit hash.
 
 ---
 
@@ -90,8 +97,8 @@ packages:
 | `packages/gy39-uart.yaml` | Creates its own UART bus `${gy39_id}_uart` |
 | `packages/gy39-i2c.yaml` | Uses the `i2c:` bus **from your main config** (define it there, `frequency: 50kHz` recommended) |
 
-Both add the external component and the [recommended sensors](#recommended-configuration).
-Full example: [`examples/gy39-package.yaml`](examples/gy39-package.yaml).
+Both add the external component and the recommended sensors (the full list is in [Manual configuration](#manual-configuration)).
+Complete examples: [`examples/gy39-uart.yaml`](examples/gy39-uart.yaml), [`examples/gy39-i2c.yaml`](examples/gy39-i2c.yaml).
 
 **Variables.** Set them under `vars:`. The package's own `defaults:` take precedence over top-level `substitutions:`,
 so a top-level substitution only works for `gy39_station_altitude`, which has no default.
@@ -150,10 +157,11 @@ On ESP8266 with the UART package on GPIO1/GPIO3, also set `logger: baud_rate: 0`
 
 ---
 
-## Recommended configuration
+## Manual configuration
 
-This set contains only values with a high reference value
-(see [Which values to trust](#which-values-to-trust)). Add the `uart:` or `i2c:` bus from the examples below.
+Without the package, load the component with `external_components` (see [Installation](#installation))
+and write the configuration yourself. The block below is what the package sets up: only values with a high
+reference value (see [Which values to trust](#which-values-to-trust)). You also need a `uart:` or `i2c:` bus.
 
 ```yaml
 sensor:
@@ -241,10 +249,12 @@ The **S0 pin** selects the module's interface, and the module reads it **at powe
 ### ESP32
 
 ESP32 has spare hardware UARTs, so this is the easiest setup.
+Wiring: CT → GPIO16 (ESP RX), DR → GPIO17 (ESP TX), S0 unconnected.
 
 ```yaml
 esphome:
   name: gy39-uart
+  friendly_name: GY39
 
 esp32:
   board: esp32dev
@@ -253,62 +263,55 @@ esp32:
 
 logger:
 
-external_components:
-  - source: github://ch155260/esphome-gy39@main
-    components: [gy39]
-
-uart:
-  id: gy39_uart
-  tx_pin: GPIO17   # -> GY-39 DR (module RX)
-  rx_pin: GPIO16   # <- GY-39 CT (module TX)
-  baud_rate: 9600  # factory default
-
-sensor:
-  - platform: gy39
-    interface: uart        # default, may be omitted
-    uart_id: gy39_uart
-    update_interval: 60s
-    station_altitude: 35   # m above sea level, required for sea_level_pressure
-    illuminance:
-      name: "GY39 Illuminance"
-    temperature:
-      name: "GY39 Temperature"
-    pressure:
-      name: "GY39 Pressure"
-    humidity:
-      name: "GY39 Humidity"
-    sea_level_pressure:
-      name: "GY39 Sea Level Pressure"
-    absolute_humidity:
-      name: "GY39 Absolute Humidity"
-    dew_point:
-      name: "GY39 Dew Point"
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"   # required: sensor height above sea level (m)
+          gy39_tx_pin: GPIO17           # ESP TX -> GY-39 DR (module RX)
+          gy39_rx_pin: GPIO16           # ESP RX <- GY-39 CT (module TX)
 ```
 
 ### ESP8266
 
 ESP8266 has only one full hardware UART (GPIO1/GPIO3), which the logger uses by default.
-Either disable logger output on UART, or use the software-serial pins:
+Either free it from the logger:
 
 ```yaml
 logger:
-  baud_rate: 0          # free hardware UART0 for the sensor
+  baud_rate: 0                          # free hardware UART0 for the sensor
 
-uart:
-  id: gy39_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO3
-  baud_rate: 9600
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"
+          gy39_tx_pin: GPIO1
+          gy39_rx_pin: GPIO3
 ```
 
-or, keeping serial logging:
+or keep serial logging and use software serial on other pins:
 
 ```yaml
-uart:
-  id: gy39_uart
-  tx_pin: GPIO14        # D5, software serial
-  rx_pin: GPIO12        # D6, software serial
-  baud_rate: 9600       # 9600 is fine for software serial
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"
+          gy39_tx_pin: GPIO14           # D5, software serial
+          gy39_rx_pin: GPIO12           # D6, software serial (9600 baud is fine)
 ```
 
 **How UART mode works:** on every `update_interval` the component sends the
@@ -321,47 +324,33 @@ so values are still published only once per `update_interval`.
 ## I2C example
 
 1. Tie **S0 to GND**, then power up the module.
-2. Use a low I2C bus frequency.
+2. Define the I2C bus in your config (the I2C package uses it) with a low frequency.
 
 ```yaml
 esphome:
   name: gy39-i2c
+  friendly_name: GY39
 
 esp8266:
   board: d1_mini
 
 logger:
 
-external_components:
-  - source: github://ch155260/esphome-gy39@main
-    components: [gy39]
-
 i2c:
-  sda: GPIO4        # D2 -> GY-39 DR
-  scl: GPIO5        # D1 -> GY-39 CT
-  frequency: 50kHz  # recommended, the module's MCU is slow
-  scan: true        # should report a device at 0x5B
+  sda: GPIO4          # D2 -> GY-39 DR
+  scl: GPIO5          # D1 -> GY-39 CT
+  frequency: 50kHz    # recommended, the module's MCU is slow
+  scan: true          # the log should show a device at 0x5B
 
-sensor:
-  - platform: gy39
-    interface: i2c
-    address: 0x5B   # default, may be omitted
-    update_interval: 60s
-    station_altitude: 35   # m above sea level, required for sea_level_pressure
-    illuminance:
-      name: "GY39 Illuminance"
-    temperature:
-      name: "GY39 Temperature"
-    pressure:
-      name: "GY39 Pressure"
-    humidity:
-      name: "GY39 Humidity"
-    sea_level_pressure:
-      name: "GY39 Sea Level Pressure"
-    absolute_humidity:
-      name: "GY39 Absolute Humidity"
-    dew_point:
-      name: "GY39 Dew Point"
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "35"   # required: sensor height above sea level (m)
 ```
 
 For ESP32, use any two GPIOs, for example `sda: GPIO21` and `scl: GPIO22`, with the same `frequency: 50kHz`.

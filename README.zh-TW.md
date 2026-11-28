@@ -42,7 +42,7 @@ GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上�
 
 - [安裝](#安裝)
 - [以 Package 匯入](#以-package-匯入)
-- [建議設定](#建議設定)
+- [手動設定](#手動設定)
 - [UART 與 I2C 怎麼選](#uart-與-i2c-怎麼選)
 - [接線](#接線)
 - [UART 使用範例](#uart-使用範例)
@@ -60,13 +60,18 @@ GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上�
 
 ## 安裝
 
+**建議做法：用 package 匯入。** 只要一段 `packages:`，就會加上元件、匯流排（UART）和所有建議的感測器。
+請參考[以 Package 匯入](#以-package-匯入)，以及完整的 [UART](#uart-使用範例)、[I2C](#i2c-使用範例) 範例。
+
+**另一種做法：只載入元件**，感測器設定自己寫（見[手動設定](#手動設定)）：
+
 ```yaml
 external_components:
   - source: github://ch155260/esphome-gy39@main
     components: [gy39]
 ```
 
-想固定在某個版本的話，把 `@main` 換成 tag 或 commit hash。
+想固定在某個版本的話，把 `@main`（以及 package 的 `ref`）換成 tag 或 commit hash。
 
 ---
 
@@ -95,8 +100,8 @@ packages:
 | `packages/gy39-uart.yaml` | 自己建立 UART 匯流排 `${gy39_id}_uart` |
 | `packages/gy39-i2c.yaml` | 使用**主設定檔**裡的 `i2c:` 匯流排（請在主設定檔定義，建議 `frequency: 50kHz`） |
 
-兩種 package 都會加上外部元件，以及[建議設定](#建議設定)裡的所有感測器。
-完整範例見 [`examples/gy39-package.yaml`](examples/gy39-package.yaml)。
+兩種 package 都會加上外部元件和所有建議的感測器（完整清單見[手動設定](#手動設定)）。
+完整範例：[`examples/gy39-uart.yaml`](examples/gy39-uart.yaml)、[`examples/gy39-i2c.yaml`](examples/gy39-i2c.yaml)。
 
 **變數**請寫在 `vars:` 底下。注意：package 內建的 `defaults:` 優先權比主設定檔最上層的 `substitutions:` 高，
 所以用 `substitutions:` 只能設定沒有預設值的 `gy39_station_altitude`，其他變數一定要用 `vars:`。
@@ -155,10 +160,11 @@ ESP8266 如果用 UART package 接在 GPIO1/GPIO3，記得另外設定 `logger: 
 
 ---
 
-## 建議設定
+## 手動設定
 
-這組設定只包含參考價值高的數值（原因見[數值參考價值](#數值參考價值)）。
-`uart:` 或 `i2c:` 匯流排的設定請參考後面的範例。
+不用 package 的話，先用 `external_components` 載入元件（見[安裝](#安裝)），再自己撰寫設定。
+下面這段就是 package 幫你設定的內容，只包含參考價值高的數值（原因見[數值參考價值](#數值參考價值)）。
+另外還需要 `uart:` 或 `i2c:` 匯流排。
 
 ```yaml
 sensor:
@@ -246,10 +252,12 @@ sensor:
 ### ESP32
 
 ESP32 有多組閒置的硬體 UART，設定最簡單。
+接線：CT → GPIO16（ESP RX）、DR → GPIO17（ESP TX），S0 懸空。
 
 ```yaml
 esphome:
   name: gy39-uart
+  friendly_name: GY39
 
 esp32:
   board: esp32dev
@@ -258,62 +266,56 @@ esp32:
 
 logger:
 
-external_components:
-  - source: github://ch155260/esphome-gy39@main
-    components: [gy39]
-
-uart:
-  id: gy39_uart
-  tx_pin: GPIO17   # 接 GY-39 的 DR（模組 RX）
-  rx_pin: GPIO16   # 接 GY-39 的 CT（模組 TX）
-  baud_rate: 9600  # 出廠預設
-
-sensor:
-  - platform: gy39
-    interface: uart        # 預設值，可以省略
-    uart_id: gy39_uart
-    update_interval: 60s
-    station_altitude: 35   # 感測器的海拔（m），sea_level_pressure 必填
-    illuminance:
-      name: "GY39 照度 Illuminance"
-    temperature:
-      name: "GY39 溫度 Temperature"
-    pressure:
-      name: "GY39 氣壓 Pressure"
-    humidity:
-      name: "GY39 濕度 Humidity"
-    sea_level_pressure:
-      name: "GY39 海平面氣壓 Sea Level Pressure"
-    absolute_humidity:
-      name: "GY39 絕對濕度 Absolute Humidity"
-    dew_point:
-      name: "GY39 露點 Dew Point"
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"     # 必填：感測器的海拔（m）
+          gy39_tx_pin: GPIO17             # ESP TX -> GY-39 DR（模組 RX）
+          gy39_rx_pin: GPIO16             # ESP RX <- GY-39 CT（模組 TX）
+          gy39_tendency_language: zh-TW   # 趨勢文字用中文
 ```
 
 ### ESP8266
 
 ESP8266 只有一組完整的硬體 UART（GPIO1/GPIO3），而且預設被 logger 佔用。
-有兩種做法，第一種是關掉 logger 的序列埠輸出：
+第一種做法是把它從 logger 讓出來：
 
 ```yaml
 logger:
-  baud_rate: 0          # 把硬體 UART0 讓給感測器
+  baud_rate: 0                            # 把硬體 UART0 讓給感測器
 
-uart:
-  id: gy39_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO3
-  baud_rate: 9600
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"
+          gy39_tx_pin: GPIO1
+          gy39_rx_pin: GPIO3
 ```
 
-第二種是保留序列埠 log，改用軟體序列埠：
+第二種做法是保留序列埠 log，改用其他腳位的軟體序列埠：
 
 ```yaml
-uart:
-  id: gy39_uart
-  tx_pin: GPIO14        # D5，軟體序列埠
-  rx_pin: GPIO12        # D6，軟體序列埠
-  baud_rate: 9600       # 軟體序列埠跑 9600 沒有問題
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml
+        vars:
+          gy39_station_altitude: "35"
+          gy39_tx_pin: GPIO14             # D5，軟體序列埠
+          gy39_rx_pin: GPIO12             # D6，軟體序列埠（9600 baud 沒問題）
 ```
 
 **UART 模式運作方式：** 每到一次 `update_interval`，元件就送出「查詢一次」指令 `A5 53 F8`，
@@ -325,47 +327,35 @@ uart:
 ## I2C 使用範例
 
 1. 先把 **S0 接 GND**，再讓模組上電。
-2. I2C 匯流排的頻率要調低。
+2. 在主設定檔定義 I2C 匯流排（I2C package 會使用它），頻率要調低。
 
 ```yaml
 esphome:
   name: gy39-i2c
+  friendly_name: GY39
 
 esp8266:
   board: d1_mini
 
 logger:
 
-external_components:
-  - source: github://ch155260/esphome-gy39@main
-    components: [gy39]
-
 i2c:
-  sda: GPIO4        # D2，接 GY-39 的 DR
-  scl: GPIO5        # D1，接 GY-39 的 CT
-  frequency: 50kHz  # 建議值，模組上的 MCU 回應比較慢
-  scan: true        # 開機時 log 應該會掃到 0x5B
+  sda: GPIO4          # D2，接 GY-39 的 DR
+  scl: GPIO5          # D1，接 GY-39 的 CT
+  frequency: 50kHz    # 建議值，模組上的 MCU 回應比較慢
+  scan: true          # 開機時 log 應該會掃到 0x5B
 
-sensor:
-  - platform: gy39
-    interface: i2c
-    address: 0x5B   # 預設值，可以省略
-    update_interval: 60s
-    station_altitude: 35   # 感測器的海拔（m），sea_level_pressure 必填
-    illuminance:
-      name: "GY39 照度 Illuminance"
-    temperature:
-      name: "GY39 溫度 Temperature"
-    pressure:
-      name: "GY39 氣壓 Pressure"
-    humidity:
-      name: "GY39 濕度 Humidity"
-    sea_level_pressure:
-      name: "GY39 海平面氣壓 Sea Level Pressure"
-    absolute_humidity:
-      name: "GY39 絕對濕度 Absolute Humidity"
-    dew_point:
-      name: "GY39 露點 Dew Point"
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main
+    refresh: 1d
+    files:
+      - path: packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "35"     # 必填：感測器的海拔（m）
+          gy39_name_prefix: "陽台 "       # 實體名稱前綴（選填）
+          gy39_tendency_language: zh-TW   # 趨勢文字用中文
 ```
 
 ESP32 可以用任意兩支 GPIO，例如 `sda: GPIO21`、`scl: GPIO22`，頻率一樣設 `frequency: 50kHz`。

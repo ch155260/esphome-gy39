@@ -1,42 +1,74 @@
 # =====================================================================
 # GY-39 package — I2C mode through the on-board MCU (address 0x5B)
+# GY-39 package — I2C 模式，透過板上 MCU 讀取（位址 0x5B）
 # https://github.com/ch155260/esphome-gy39
 #
-# Wiring: VCC -> 3V3, GND -> GND, CT -> SCL, DR -> SDA
-#         S0 tied to GND (I2C mode; power-cycle the module after changing it)
-#         Leave the chip-side SCL/SDA/INT pins (if your board has them) unconnected
+# Wiring / 接線:
+#   VCC -> 3V3, GND -> GND, CT -> SCL, DR -> SDA
+#   S0 -> GND (I2C mode; power-cycle the module after changing it)
+#   S0 接 GND（I2C 模式；改接後模組要斷電重開）
+#   Chip-side SCL/SDA/INT pins (if present): leave unconnected
+#   板子若有晶片端的 SCL/SDA/INT 腳位：不接
 #
-# Your main config must define the I2C bus, e.g.
+# The I2C bus must be defined in your main config:
+# I2C 匯流排要在主設定檔定義：
 #   i2c:
 #     sda: GPIO4
 #     scl: GPIO5
-#     frequency: 50kHz     # recommended, the MCU is slow
-# With several buses, select one:  sensor: [{id: !extend gy39_sensor, i2c_id: my_bus}]
+#     frequency: 50kHz     # recommended, the MCU is slow / 建議值，MCU 回應較慢
+# Several buses: select one with / 有多條匯流排時用這個指定：
+#   sensor: [{id: !extend gy39_sensor, i2c_id: my_bus}]
 #
-# packages:
-#   gy39:
-#     url: https://github.com/ch155260/esphome-gy39
-#     ref: main
-#     files:
-#       - path: packages/gy39-i2c.yaml
-#         vars:
-#           gy39_station_altitude: "31"
+# Usage / 用法:
+#   packages:
+#     gy39:
+#       url: https://github.com/ch155260/esphome-gy39
+#       ref: main
+#       refresh: 1d
+#       files:
+#         - path: packages/gy39-i2c.yaml
+#           vars:
+#             gy39_station_altitude: "31"
 #
-# IDs: ${gy39_id}_sensor (platform entry, use with !extend),
-#      ${gy39_id}_temperature, ${gy39_id}_dew_point, ... (one per sensor below)
+# Customise in your main config / 在主設定檔修改內容:
+#   sensor:
+#     - id: !extend gy39_sensor            # = ${gy39_id}_sensor
+#       humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
+#       illuminance: !remove               # drop a sensor / 拿掉不要的感測器
+#
+# Variables must be passed with vars: (top-level substitutions do NOT override these defaults)
+# 變數請用 vars: 傳入（主設定檔的 substitutions 蓋不掉這裡的 defaults）
 # =====================================================================
 
 defaults:
+  # REQUIRED, no default / 必填，沒有預設值:
+  #   gy39_station_altitude: sensor height above sea level (m) / 感測器的海拔（m）
+  #                          = ground elevation + mounting height / 地面海拔 + 安裝高度
+
+  # ID prefix of every entity; use a different value for each module
+  # 所有實體 ID 的前綴；接多顆模組時每顆要不同
   gy39_id: gy39
-  gy39_name_prefix: ""              # e.g. "Balcony " or "陽台 " (trailing space); several modules: prefixes must differ in ASCII
-  gy39_update_interval: 60s
-  gy39_tendency_language: en        # en / zh-TW
-  gy39_temperature_offset: "0"      # °C
-  gy39_pressure_offset: "0"         # hPa
-  gy39_failure_timeout: 60s         # no good reading for this long -> values become unknown (NaN)
-  gy39_ref: main                    # component version: branch / tag / commit
-  # gy39_station_altitude           REQUIRED, no default: sensor height above sea level (m)
-  gy39_address: "0x5B"
+
+  # Entity name prefix, e.g. "Balcony " or "陽台 " (note the trailing space).
+  # Several modules: prefixes must differ in ASCII letters/digits.
+  # 實體名稱前綴，例如 "Balcony " 或 "陽台 "（注意結尾空格）。
+  # 多顆模組時，前綴要有英文或數字上的差異（中文在內部 ID 裡都會變成 _）。
+  gy39_name_prefix: ""
+
+  gy39_update_interval: 60s         # polling interval / 更新間隔
+  gy39_tendency_language: en        # en / zh-TW: language of the tendency text / 趨勢文字語言
+  gy39_temperature_offset: "0"      # °C, temperature correction / 溫度修正
+  gy39_pressure_offset: "0"         # hPa, pressure correction / 氣壓修正
+
+  # No good reading for this long -> values become unknown (NaN)
+  # 超過這段時間都沒有成功讀取 -> 數值變成「未知」
+  gy39_failure_timeout: 60s
+
+  # Component version (branch / tag / commit); keep it equal to the package "ref"
+  # 元件版本（分支 / tag / commit）；請和 package 的 ref 相同
+  gy39_ref: main
+
+  gy39_address: "0x5B"              # I2C address / I2C 位址
 
 external_components:
   - source: github://ch155260/esphome-gy39@${gy39_ref}
@@ -45,7 +77,9 @@ external_components:
 
 sensor:
   - platform: gy39
-    id: ${gy39_id}_sensor            # not just "gy39": that clashes with the integration name
+    # Not just "gy39": that name is reserved for the integration
+    # 不能只寫 "gy39"：這個名稱被元件本身佔用
+    id: ${gy39_id}_sensor
     interface: i2c
     address: ${gy39_address}
     update_interval: ${gy39_update_interval}
@@ -69,7 +103,7 @@ sensor:
       id: ${gy39_id}_illuminance
       name: "${gy39_name_prefix}Illuminance"
 
-    # ---------- Calculated / 計算值 ----------
+    # ---------- Calculated (not affected by self-heating) / 計算值（不受自熱影響） ----------
     dew_point:
       id: ${gy39_id}_dew_point
       name: "${gy39_name_prefix}Dew Point"
@@ -83,7 +117,8 @@ sensor:
       id: ${gy39_id}_sea_level_pressure
       name: "${gy39_name_prefix}Sea Level Pressure"
 
-    # ---------- Trends (published every 10 min / on change) / 趨勢 ----------
+    # ---------- Trends: published every 10 min (text: on change) ----------
+    # ---------- 趨勢：每 10 分鐘發布一次（文字：內容改變時才發布） ----------
     pressure_trend_3h:
       id: ${gy39_id}_pressure_trend_3h
       name: "${gy39_name_prefix}Pressure Trend 3h"
