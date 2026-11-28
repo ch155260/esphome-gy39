@@ -41,6 +41,7 @@ GY-39 由 MAX44009 照度感測器、BME280 溫濕度/氣壓感測器，加上�
 ## 目錄
 
 - [安裝](#安裝)
+- [以 Package 匯入](#以-package-匯入)
 - [建議設定](#建議設定)
 - [UART 與 I2C 怎麼選](#uart-與-i2c-怎麼選)
 - [接線](#接線)
@@ -66,6 +67,78 @@ external_components:
 ```
 
 想固定在某個版本的話，把 `@main` 換成 tag 或 commit hash。
+
+---
+
+## 以 Package 匯入
+
+不想自己寫匯流排、`external_components` 和每一個感測器的話，可以直接匯入本 repo 準備好的
+[package](https://esphome.io/components/packages/)：
+
+```yaml
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main                 # 也可以填 tag 或 commit 來固定版本
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml      # I2C 模式改用 packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "31"      # 必填
+          gy39_tx_pin: GPIO17
+          gy39_rx_pin: GPIO16
+          gy39_tendency_language: zh-TW
+```
+
+這個 package 會幫你加上 `uart:` 或 `i2c:` 匯流排、外部元件，以及[建議設定](#建議設定)裡的所有感測器。
+完整範例見 [`examples/gy39-package.yaml`](examples/gy39-package.yaml)。
+
+**變數**（寫在 `vars:` 底下，或寫在自己設定檔最上層的 `substitutions:`）：
+
+| 變數 | 適用 | 預設值 | 說明 |
+|---|---|---|---|
+| `gy39_station_altitude` | 兩者 | **必填** | 感測器的海拔（m） |
+| `gy39_name` | 兩者 | `GY39` | 實體名稱的前綴（請用英文或數字，原因見下方說明） |
+| `gy39_update_interval` | 兩者 | `60s` | 更新間隔 |
+| `gy39_tendency_language` | 兩者 | `en` | 趨勢文字的語言：`en` 或 `zh-TW` |
+| `gy39_ref` | 兩者 | `main` | 元件的 git 版本，請設成和 package 的 `ref` 相同 |
+| `gy39_tx_pin` / `gy39_rx_pin` | UART | `GPIO17` / `GPIO16` | ESP TX → GY-39 DR、ESP RX ← GY-39 CT |
+| `gy39_baud_rate` | UART | `9600` | UART 鮑率 |
+| `gy39_sda_pin` / `gy39_scl_pin` | I2C | `GPIO4` / `GPIO5` | SDA → DR、SCL → CT |
+| `gy39_i2c_frequency` | I2C | `50kHz` | I2C 頻率 |
+
+**修改 package 的內容。** 每個實體都有固定的 ID：感測器平台本身是 `gy39_sensor`，其他還有
+`gy39_temperature`、`gy39_dew_point`、`gy39_uart`、`gy39_i2c` 等。用 `!extend` 修改設定，用 `!remove` 拿掉不要的感測器：
+
+```yaml
+sensor:
+  - id: !extend gy39_sensor
+    temperature_offset: -0.8
+    humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
+    illuminance: !remove
+    mixing_ratio: !remove
+```
+
+**已經有 I2C 匯流排了？** 不要再定義一條 id 也叫 `gy39_i2c` 的匯流排，ESPHome 會報「redefined」錯誤。請改用下面其中一種寫法：
+
+```yaml
+# a) 沿用 package 的匯流排，只調整設定
+i2c:
+  - id: !extend gy39_i2c
+    scan: true
+
+# b) 保留自己的匯流排，移除 package 的那一條
+i2c:
+  - id: !remove gy39_i2c
+  - id: my_bus
+    sda: GPIO4
+    scl: GPIO5
+sensor:
+  - id: !extend gy39_sensor
+    i2c_id: my_bus
+```
+
+ESP8266 如果用 UART package 接在 GPIO1/GPIO3，記得另外設定 `logger: baud_rate: 0`。
 
 ---
 

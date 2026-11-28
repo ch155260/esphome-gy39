@@ -37,6 +37,7 @@ Calculated values are only computed when they are configured.
 ## Table of contents
 
 - [Installation](#installation)
+- [Package (quickest setup)](#package-quickest-setup)
 - [Recommended configuration](#recommended-configuration)
 - [Choosing UART or I2C](#choosing-uart-or-i2c)
 - [Wiring](#wiring)
@@ -62,6 +63,77 @@ external_components:
 ```
 
 To pin a specific version, replace `@main` with a tag or commit hash.
+
+---
+
+## Package (quickest setup)
+
+Instead of writing the bus, `external_components` and every sensor yourself, you can import a
+ready-made [package](https://esphome.io/components/packages/) from this repository:
+
+```yaml
+packages:
+  gy39:
+    url: https://github.com/ch155260/esphome-gy39
+    ref: main                 # or a tag / commit to pin a version
+    refresh: 1d
+    files:
+      - path: packages/gy39-uart.yaml      # or packages/gy39-i2c.yaml
+        vars:
+          gy39_station_altitude: "31"      # required
+          gy39_tx_pin: GPIO17
+          gy39_rx_pin: GPIO16
+```
+
+The package adds the `uart:` / `i2c:` bus, the external component and the
+[recommended sensors](#recommended-configuration). Full example: [`examples/gy39-package.yaml`](examples/gy39-package.yaml).
+
+**Variables** (pass them under `vars:`, or as top-level `substitutions:` in your config):
+
+| Variable | Package | Default | Description |
+|---|---|---|---|
+| `gy39_station_altitude` | both | **required** | Sensor height above sea level (m) |
+| `gy39_name` | both | `GY39` | Entity name prefix (use ASCII, see the note below) |
+| `gy39_update_interval` | both | `60s` | Polling interval |
+| `gy39_tendency_language` | both | `en` | `en` or `zh-TW` |
+| `gy39_ref` | both | `main` | Git ref of the component. Set it to the same value as the package `ref` |
+| `gy39_tx_pin` / `gy39_rx_pin` | UART | `GPIO17` / `GPIO16` | ESP TX → GY-39 DR, ESP RX ← GY-39 CT |
+| `gy39_baud_rate` | UART | `9600` | UART baud rate |
+| `gy39_sda_pin` / `gy39_scl_pin` | I2C | `GPIO4` / `GPIO5` | SDA → DR, SCL → CT |
+| `gy39_i2c_frequency` | I2C | `50kHz` | I2C bus frequency |
+
+**Changing the package.** Every entity has a fixed ID (`gy39_sensor` for the platform entry,
+`gy39_temperature`, `gy39_dew_point`, `gy39_uart`, `gy39_i2c`, …). Use `!extend` to change options and `!remove` to drop sensors:
+
+```yaml
+sensor:
+  - id: !extend gy39_sensor
+    temperature_offset: -0.8
+    humidity_calibration: ["34.0 -> 32.8", "77.5 -> 75.3"]
+    illuminance: !remove
+    mixing_ratio: !remove
+```
+
+**Already have an I2C bus?** Don't define another bus with the id `gy39_i2c`. ESPHome reports it as "redefined". Use one of these instead:
+
+```yaml
+# a) use the package's bus and adjust it
+i2c:
+  - id: !extend gy39_i2c
+    scan: true
+
+# b) keep your own bus and remove the package's
+i2c:
+  - id: !remove gy39_i2c
+  - id: my_bus
+    sda: GPIO4
+    scl: GPIO5
+sensor:
+  - id: !extend gy39_sensor
+    i2c_id: my_bus
+```
+
+On ESP8266 with the UART package on GPIO1/GPIO3, also set `logger: baud_rate: 0`.
 
 ---
 
